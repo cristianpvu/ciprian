@@ -1,0 +1,107 @@
+<resources>
+    <string name="app_name">Ciprian NFC</string>
+
+    <!-- Main -->
+    <string name="program_tag">Program Tag</string>
+    <string name="no_tags">No Tags Yet</string>
+    <string name="tap_plus_to_program">Tap + to program your first NFC tag</string>
+    <string name="settings">Settings</string>
+    <string name="nfc_tag">NFC Tag</string>
+    <string name="more_options">More options</string>
+    <string name="scans">Scans</string>
+    <string name="last_scan">Last Scan</string>
+    <string name="never">Never</string>
+
+    <!-- Program Tag -->
+    <string name="step_1_configuration">Step 1: Configuration</string>
+    <string name="step_2_scan_tag">Step 2: Scan Tag</string>
+    <string name="tag_name">Tag Name</string>
+    <string name="base_url">Base URL</string>
+    <string name="base_url_helper">URL where verification requests will be sent</string>
+    <string name="description_optional">Description (optional)</string>
+    <string name="hold_tag_near_phone">Hold tag near phone to scan</string>
+    <string name="scan_nfc">Scan NFC</string>
+    <string name="tag_info">Tag Information</string>
+    <string name="programming">Programming…</string>
+    <string name="programming_complete">Programming complete!</string>
+    <string name="programming_failed">Programming failed</string>
+
+    <!-- Tag Details -->
+    <string name="tag_details">Tag Details</string>
+    <string name="statistics">Statistics</string>
+    <string name="total_scans">Total Scans</string>
+    <string name="sdm_url">SDM URL</string>
+    <string name="description">Description</string>
+    <string name="actions">Actions</string>
+    <string name="factory_reset">Factory Reset</string>
+    <string name="factory_reset_desc">Reset tag to factory defaults. Hold tag near phone when prompted.</string>
+    <string name="factory_reset_confirm">This will reset the tag to factory defaults (unsecured). The tag will be removed from your account. Continue?</string>
+    <string name="hold_tag_to_reset">Hold tag near phone to reset...</string>
+    <string name="resetting_tag">Resetting tag...</string>
+    <string name="reset_complete">Tag reset to factory defaults</string>
+    <string name="reset_failed">Reset failed</string>
+
+    <!-- Settings - Supabase -->
+    <string name="supabase_config">Supabase Configuration</string>
+    <string name="supabase_config_desc">Connect to your Supabase project</string>
+    <string name="supabase_url">Project URL</string>
+    <string name="supabase_url_helper">e.g., https://xxxxx.supabase.co</string>
+    <string name="supabase_anon_key">Anon Key</string>
+    <string name="supabase_anon_key_helper">Public anon key from Supabase dashboard</string>
+    <string name="org_api_key">Organization API Key</string>
+    <string name="org_api_key_helper">Your organization key from the database</string>
+    <string name="verify_url_title">Verification URL</string>
+    <string name="verify_url_desc">URL programmed into NFC tags for verification</string>
+    <string name="verify_url">Verification URL</string>
+
+    <!-- Settings - Legacy (kept for compatibility) -->
+    <string name="api_configuration">API Configuration</string>
+    <string name="api_url">API URL</string>
+    <string name="api_key">API Key</string>
+    <string name="save">Save</string>
+    <string name="default_base_url">Default Base URL</string>
+    <string name="default_base_url_description">This URL will be pre-filled when programming new tags</string>
+    <string name="about">About</string>
+    <string name="app_description">Ciprian NFC is a complete solution for programming and managing NTAG 424 DNA chips with Secure Dynamic Messaging (SDM).</string>
+    <string name="saved">Saved</string>
+
+    <!-- NFC -->
+    <string name="nfc_not_available">NFC is not available on this device</string>
+    <string name="nfc_disabled">Please enable NFC in settings</string>
+    <string name="not_ntag424">This is not an NTAG 424 DNA tag</string>
+    <string name="tag_detected">Tag detected!</string>
+    <string name="reading_tag">Reading tag information…</string>
+
+    <!-- Errors -->
+    <string name="error">Error</string>
+    <string name="error_reading_tag">Error reading tag</string>
+    <string name="error_programming_tag">Error programming tag</string>
+    <string name="please_fill_fields">Please fill in all required fields</string>
+    <string name="invalid_url">Please enter a valid URL</string>
+
+    <!-- Login / Account -->
+    <string name="login">Login</string>
+    <string name="register">Register</string>
+    <string name="email">Email</string>
+    <string name="password">Password</string>
+    <string name="name">Name</string>
+    <string name="account">Account</string>
+    <string name="server">Server</string>
+    <string name="login_subtitle">Program and manage NFC tags</string>
+    <string name="no_account">Don\'t have an account?</string>
+    <string name="have_account">Already have an account?</string>
+    <string name="login_failed">Login failed</string>
+    <string name="register_failed">Registration failed</string>
+    <string name="register_success">Account created successfully!</string>
+    <string name="password_too_short">Password must be at least 6 characters</string>
+    <string name="logout">Logout</string>
+    <string name="logout_confirm">Are you sure you want to logout?</string>
+
+    <!-- Dialog -->
+    <string name="success">Success</string>
+    <string name="ok">OK</string>
+    <string name="cancel">Cancel</string>
+    <string name="delete">Delete</string>
+    <string name="delete_tag">Delete Tag</string>
+    <string name="delete_tag_confirm">Are you sure you want to delete this tag? This action cannot be undone.</string>
+</resources>
