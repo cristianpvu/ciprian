@@ -212,6 +212,16 @@
                 android:enabled="false"
                 android:text="@string/program_tag" />
 
+            <!-- Factory Reset Button -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/buttonFactoryReset"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:enabled="false"
+                android:text="@string/factory_reset"
+                style="@style/Widget.Material3.Button.OutlinedButton" />
+
         </LinearLayout>
 
     </ScrollView>

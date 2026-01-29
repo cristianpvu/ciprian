@@ -37,8 +37,11 @@ public class ProgramTagActivity extends AppCompatActivity {
     private String expectedUid; // UID of the tag we expect to program
 
     private boolean waitingForProgramScan = false;
+    private boolean waitingForResetScan = false;
     private boolean isProgramming = false;
+    private boolean isResetting = false;
     private Ntag424DnaProgrammer.ProgrammingConfig pendingConfig;
+    private Ntag424DnaProgrammer.TagKeys pendingResetKeys;
     private String pendingTagName;
     private String pendingDescription;
 
@@ -85,6 +88,7 @@ public class ProgramTagActivity extends AppCompatActivity {
 
     private void setupViews() {
         binding.buttonProgram.setOnClickListener(v -> onProgramButtonClick());
+        binding.buttonFactoryReset.setOnClickListener(v -> onFactoryResetButtonClick());
     }
 
     private void loadDefaults() {
@@ -117,7 +121,9 @@ public class ProgramTagActivity extends AppCompatActivity {
         if (NfcAdapter.ACTION_TECH_DISCOVERED.equals(intent.getAction())) {
             Tag tag = intent.getParcelableExtra(NfcAdapter.EXTRA_TAG, Tag.class);
             if (tag != null) {
-                if (waitingForProgramScan) {
+                if (waitingForResetScan) {
+                    handleResetScan(tag);
+                } else if (waitingForProgramScan) {
                     handleProgramScan(tag);
                 } else {
                     handleInfoScan(tag);
@@ -148,6 +154,8 @@ public class ProgramTagActivity extends AppCompatActivity {
                     expectedUid = lastTagInfo.uid;
                     binding.textScanStatus.setText(R.string.tag_detected);
                     binding.buttonProgram.setEnabled(true);
+                    // Enable reset button only if tag has custom keys
+                    binding.buttonFactoryReset.setEnabled(!lastTagInfo.hasDefaultKeys);
                 });
             } catch (Exception e) {
                 runOnUiThread(() -> {
@@ -317,5 +325,141 @@ public class ProgramTagActivity extends AppCompatActivity {
                         });
                     }
                 });
+    }
+
+    private void onFactoryResetButtonClick() {
+        if (lastTagInfo == null) {
+            Toast.makeText(this, "Please scan a tag first", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        if (lastTagInfo.hasDefaultKeys) {
+            Toast.makeText(this, "Tag already has default keys", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        // Show dialog asking for master key
+        showKeyInputDialog();
+    }
+
+    private void showKeyInputDialog() {
+        final android.widget.EditText input = new android.widget.EditText(this);
+        input.setHint("Enter Master Key (hex)");
+        input.setInputType(android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+
+        new AlertDialog.Builder(this)
+                .setTitle("Factory Reset")
+                .setMessage("Enter the current master key (32 hex characters):")
+                .setView(input)
+                .setPositiveButton("Reset", (dialog, which) -> {
+                    String keyHex = input.getText().toString().trim();
+                    if (keyHex.length() != 32) {
+                        Toast.makeText(this, "Key must be 32 hex characters", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    startFactoryReset(keyHex);
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void startFactoryReset(String masterKeyHex) {
+        binding.buttonProgram.setEnabled(false);
+        binding.buttonFactoryReset.setEnabled(false);
+        binding.progressBar.setVisibility(View.VISIBLE);
+        binding.progressBar.setProgress(0);
+        binding.textScanStatus.setText(R.string.hold_tag_to_reset);
+
+        // Store the key for when tag is scanned
+        pendingResetKeys = new Ntag424DnaProgrammer.TagKeys();
+        pendingResetKeys.appMasterKey = masterKeyHex;
+        // SDM keys are default (we never change them)
+        pendingResetKeys.sdmMetaReadKey = "00000000000000000000000000000000";
+        pendingResetKeys.sdmFileReadKey = "00000000000000000000000000000000";
+
+        // Wait for tag scan
+        waitingForResetScan = true;
+    }
+
+    private void handleResetScan(Tag tag) {
+        waitingForResetScan = false;
+        isResetting = true;
+        binding.textScanStatus.setText(R.string.resetting_tag);
+
+        new Thread(() -> {
+            try {
+                programmer = new Ntag424DnaProgrammer();
+                programmer.connect(tag);
+
+                // Verify it's the same tag
+                Ntag424DnaProgrammer.TagInfo info = programmer.readTagInfo();
+                if (expectedUid != null && !expectedUid.equalsIgnoreCase(info.uid)) {
+                    throw new Exception("Different tag! Expected " + expectedUid + " but got " + info.uid);
+                }
+
+                // Perform factory reset
+                programmer.factoryReset(pendingResetKeys, new Ntag424DnaProgrammer.ResetCallback() {
+                    @Override
+                    public void onProgress(String message) {
+                        runOnUiThread(() -> {
+                            binding.textScanStatus.setText(message);
+                        });
+                    }
+
+                    @Override
+                    public void onError(String error) {
+                        programmer.disconnect();
+                        runOnUiThread(() -> {
+                            isResetting = false;
+                            binding.buttonProgram.setEnabled(true);
+                            binding.buttonFactoryReset.setEnabled(true);
+                            binding.progressBar.setVisibility(View.GONE);
+                            binding.textScanStatus.setText(R.string.reset_failed);
+
+                            new AlertDialog.Builder(ProgramTagActivity.this)
+                                    .setTitle(R.string.error)
+                                    .setMessage(error)
+                                    .setPositiveButton(R.string.ok, null)
+                                    .show();
+                        });
+                    }
+
+                    @Override
+                    public void onSuccess() {
+                        programmer.disconnect();
+                        runOnUiThread(() -> {
+                            isResetting = false;
+                            binding.progressBar.setVisibility(View.GONE);
+                            binding.textScanStatus.setText(R.string.reset_complete);
+
+                            new AlertDialog.Builder(ProgramTagActivity.this)
+                                    .setTitle(R.string.success)
+                                    .setMessage(R.string.reset_complete)
+                                    .setPositiveButton(R.string.ok, (dialog, which) -> {
+                                        // Refresh tag info
+                                        lastTagInfo = null;
+                                        expectedUid = null;
+                                        binding.cardTagInfo.setVisibility(View.GONE);
+                                        binding.buttonProgram.setEnabled(false);
+                                        binding.buttonFactoryReset.setEnabled(false);
+                                        binding.textScanStatus.setText(R.string.hold_tag_near_phone);
+                                    })
+                                    .setCancelable(false)
+                                    .show();
+                        });
+                    }
+                });
+
+            } catch (Exception e) {
+                runOnUiThread(() -> {
+                    isResetting = false;
+                    binding.buttonProgram.setEnabled(true);
+                    binding.buttonFactoryReset.setEnabled(true);
+                    binding.progressBar.setVisibility(View.GONE);
+                    binding.textScanStatus.setText(R.string.reset_failed);
+                    Toast.makeText(this, e.getMessage(), Toast.LENGTH_LONG).show();
+                });
+            }
+        }).start();
     }
 }

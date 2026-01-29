@@ -244,6 +244,40 @@ public class Ntag424DnaAuth {
     }
 
     /**
+     * Sends an authenticated command with encrypted data + MAC (CommMode Full)
+     * Used for ChangeFileSettings when the file has restricted Change access
+     */
+    public byte[] sendEncryptedCommand(byte cmd, byte[] header, byte[] dataToEncrypt) throws Exception {
+        if (!authenticated) {
+            throw new IllegalStateException("Not authenticated");
+        }
+
+        // Encrypt the data portion
+        byte[] encryptedData = encryptData(dataToEncrypt);
+        Log.d(TAG, "Data to encrypt: " + AesUtils.bytesToHex(dataToEncrypt));
+        Log.d(TAG, "Encrypted data: " + AesUtils.bytesToHex(encryptedData));
+
+        // Combine header + encrypted data
+        ByteArrayOutputStream combined = new ByteArrayOutputStream();
+        if (header != null) {
+            combined.write(header);
+        }
+        combined.write(encryptedData);
+        byte[] fullData = combined.toByteArray();
+
+        // Now add MAC
+        byte[] cmdData = buildMacCommand(cmd, fullData);
+        byte[] response = commands.transceive(cmd, cmdData);
+        cmdCounter++;
+
+        if (!commands.isOk(response)) {
+            throw new Exception("Command failed: " + AesUtils.bytesToHex(commands.getStatus(response)));
+        }
+
+        return commands.getData(response);
+    }
+
+    /**
      * Encrypts data for write commands
      */
     public byte[] encryptData(byte[] data) throws Exception {

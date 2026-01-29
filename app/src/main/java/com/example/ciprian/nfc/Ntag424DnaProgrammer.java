@@ -137,54 +137,92 @@ public class Ntag424DnaProgrammer {
         commands.selectApplication();
         callback.onProgress("Tag identified: " + version.getUidHex(), 10);
 
-        // Authenticate with current key (default or provided)
-        callback.onProgress("Authenticating...", 15);
+        // Log current NDEF file settings for debugging
+        try {
+            byte[] fileSettings = commands.getFileSettings(Ntag424DnaCommands.FILE_NDEF);
+            Log.d(TAG, "NDEF File Settings: " + AesUtils.bytesToHex(fileSettings));
+            // Parse: FileType(1) | FileOption(1) | AccessRights(2) | FileSize(3)
+            if (fileSettings.length >= 4) {
+                int fileOption = fileSettings[1] & 0xFF;
+                int accessByte0 = fileSettings[2] & 0xFF;
+                int accessByte1 = fileSettings[3] & 0xFF;
+                Log.d(TAG, "FileOption: 0x" + Integer.toHexString(fileOption) + 
+                    " (SDM=" + ((fileOption & 0x40) != 0) + ", CommMode=" + (fileOption & 0x03) + ")");
+                Log.d(TAG, "AccessRights: Read=" + ((accessByte0 >> 4) & 0xF) + 
+                    ", Write=" + (accessByte0 & 0xF) +
+                    ", RW=" + ((accessByte1 >> 4) & 0xF) + 
+                    ", Change=" + (accessByte1 & 0xF));
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Could not read file settings: " + e.getMessage());
+        }
+
+        // Check if tag already has custom keys
+        byte keyVersion = commands.getKeyVersion(KEY_APP_MASTER);
+        boolean hasCustomKeys = keyVersion != 0x00;
+        
+        if (hasCustomKeys && config.currentKey == null) {
+            throw new Exception("Tag already programmed with custom keys. " +
+                    "Please provide the current master key or perform factory reset first.");
+        }
+
         byte[] currentKey = config.currentKey != null ? config.currentKey : Ntag424DnaCommands.DEFAULT_KEY;
 
+        // STRATEGY: For fresh tags (default keys), write NDEF BEFORE auth
+        // because default file has Write access = Free (0xE)
+        
+        if (!hasCustomKeys) {
+            // Step 1a: Write NDEF BEFORE authentication (plain, no MAC)
+            // This works because default NDEF file has Write = Free
+            callback.onProgress("Writing NDEF data (plain)...", 20);
+            try {
+                writeNdefWithoutMac(buildNdefMessage(config.baseUrl));
+                Log.d(TAG, "NDEF write succeeded (plain mode)!");
+                
+                // Also configure SDM BEFORE auth when Change=E (free)
+                Log.d(TAG, "Configuring SDM (plain mode, before auth)...");
+                configureSdmPlain(config.baseUrl);
+                Log.d(TAG, "SDM configured (plain mode)!");
+            } catch (Exception e) {
+                Log.w(TAG, "Plain NDEF write failed: " + e.getMessage());
+                // Will try with auth below
+            }
+        }
+
+        // Step 2: Authenticate
+        callback.onProgress("Authenticating...", 30);
         if (!auth.authenticateEV2First(KEY_APP_MASTER, currentKey)) {
             throw new Exception("Authentication failed. Wrong key?");
         }
-        callback.onProgress("Authenticated successfully", 20);
+        callback.onProgress("Authenticated successfully", 35);
 
-        // Generate new keys if not provided
+        // Generate new master key if not provided
         byte[] newAppMasterKey = config.appMasterKey != null ?
                 config.appMasterKey : AesUtils.generateRandomKey();
-        byte[] newSdmMetaReadKey = config.sdmMetaReadKey != null ?
-                config.sdmMetaReadKey : AesUtils.generateRandomKey();
-        byte[] newSdmFileReadKey = config.sdmFileReadKey != null ?
-                config.sdmFileReadKey : AesUtils.generateRandomKey();
 
-        // Step 1: Configure SDM first (test MAC/encryption)
-        callback.onProgress("Configuring SDM...", 30);
-        configureSdm(config.baseUrl, newSdmMetaReadKey, newSdmFileReadKey);
-        Log.d(TAG, "SDM configuration succeeded - MAC/encryption works!");
+        // Step 3: If NDEF wasn't written yet (custom keys), write now with auth
+        if (hasCustomKeys) {
+            callback.onProgress("Writing NDEF data...", 40);
+            writeNdefWithMac(buildNdefMessage(config.baseUrl));
+            Log.d(TAG, "NDEF write succeeded (with MAC)!");
+            
+            // Configure SDM with auth (for custom keys)
+            callback.onProgress("Configuring SDM...", 55);
+            configureSdm(config.baseUrl);
+            Log.d(TAG, "SDM configuration succeeded!");
+        }
+        // Note: For default keys, SDM was already configured in plain mode before auth
 
-        // Step 2: Write NDEF with SDM-enabled URL
-        callback.onProgress("Writing NDEF data...", 45);
-        writeNdefWithSdm(config.baseUrl);
-        Log.d(TAG, "NDEF write succeeded!");
-
-        // Step 3: Re-authenticate before changing keys
-        callback.onProgress("Re-authenticating for key changes...", 55);
+        // Step 5: Change master key LAST
+        // Re-authenticate first to reset command counter
+        callback.onProgress("Re-authenticating...", 75);
         if (!auth.authenticateEV2First(KEY_APP_MASTER, currentKey)) {
             throw new Exception("Re-authentication failed");
         }
 
-        // Step 4: Change keys (other keys first, master key last)
-        callback.onProgress("Changing SDM Meta Read key...", 65);
-        auth.changeKey(KEY_SDM_META_READ, Ntag424DnaCommands.DEFAULT_KEY,
-                newSdmMetaReadKey, (byte) 0x01);
-
-        callback.onProgress("Changing SDM File Read key...", 75);
-        auth.changeKey(KEY_SDM_FILE_READ, Ntag424DnaCommands.DEFAULT_KEY,
-                newSdmFileReadKey, (byte) 0x01);
-
-        // Step 5: Re-authenticate and change master key last
-        callback.onProgress("Changing master key...", 85);
-        if (!auth.authenticateEV2First(KEY_APP_MASTER, currentKey)) {
-            throw new Exception("Re-authentication for master key change failed");
-        }
+        callback.onProgress("Changing master key...", 90);
         auth.changeKey(KEY_APP_MASTER, currentKey, newAppMasterKey, (byte) 0x01);
+        Log.d(TAG, "Master key changed successfully");
 
         callback.onProgress("Programming complete!", 100);
 
@@ -192,8 +230,9 @@ public class Ntag424DnaProgrammer {
         ProgrammingResult result = new ProgrammingResult();
         result.uid = version.getUidHex();
         result.appMasterKey = AesUtils.bytesToHex(newAppMasterKey);
-        result.sdmMetaReadKey = AesUtils.bytesToHex(newSdmMetaReadKey);
-        result.sdmFileReadKey = AesUtils.bytesToHex(newSdmFileReadKey);
+        // SDM keys remain as default (standard practice)
+        result.sdmMetaReadKey = AesUtils.bytesToHex(Ntag424DnaCommands.DEFAULT_KEY);
+        result.sdmFileReadKey = AesUtils.bytesToHex(Ntag424DnaCommands.DEFAULT_KEY);
         result.baseUrl = config.baseUrl;
 
         callback.onSuccess(result);
@@ -204,45 +243,65 @@ public class Ntag424DnaProgrammer {
      * Based on NXP AN12196 and NTAG 424 DNA datasheet.
      *
      * Uses PLAIN mirroring (MetaReadKey=0xF) so UID and counter appear as
-     * plain ASCII hex in the URL. CMAC is computed with FileReadKey for authentication.
+     * plain ASCII hex in the URL. CMAC is computed with FileReadKey (key 2) for authentication.
      */
-    private void configureSdm(String baseUrl, byte[] metaReadKey, byte[] fileReadKey)
-            throws Exception {
+    private void configureSdm(String baseUrl) throws Exception {
 
         // Determine URL prefix to calculate correct file offsets
         String urlAfterPrefix;
+        byte prefixCode;
         if (baseUrl.startsWith("https://www.")) {
             urlAfterPrefix = baseUrl.substring(12);
+            prefixCode = 0x02;
         } else if (baseUrl.startsWith("http://www.")) {
             urlAfterPrefix = baseUrl.substring(11);
+            prefixCode = 0x01;
         } else if (baseUrl.startsWith("https://")) {
             urlAfterPrefix = baseUrl.substring(8);
+            prefixCode = 0x04;
         } else if (baseUrl.startsWith("http://")) {
             urlAfterPrefix = baseUrl.substring(7);
+            prefixCode = 0x03;
         } else {
             urlAfterPrefix = baseUrl;
+            prefixCode = 0x00;
         }
 
-        // NDEF file layout:
-        // [0-1] NDEF message length (2 bytes)
-        // [2]   NDEF record header 0xD1
+        // Calculate URL with placeholders (no CMAC for simplified testing)
+        String urlWithParams = urlAfterPrefix + "?uid=00000000000000&ctr=000000";
+
+        // NDEF file layout (with 2-byte length prefix):
+        // [0-1] NDEF message length (2 bytes, big endian)
+        // [2]   NDEF record header 0xD1 (MB=1, ME=1, CF=0, SR=1, IL=0, TNF=001)
         // [3]   Type length 0x01
         // [4]   Payload length
-        // [5]   Type 'U' 0x55
+        // [5]   Type 'U' (0x55)
         // [6]   URI prefix code
-        // [7+]  URL data (after prefix removal)
-        //
-        // URL data: urlAfterPrefix + "?uid=00000000000000&ctr=000000&cmac=0000000000000000"
+        // [7+]  URL data
 
-        int ndefHeaderSize = 7;
-        int uidOffset = ndefHeaderSize + urlAfterPrefix.length() + 5; // +5 for "?uid="
-        int ctrOffset = uidOffset + 14 + 5; // +14 for UID (7 bytes = 14 hex) + 5 for "&ctr="
-        int cmacOffset = ctrOffset + 6 + 6; // +6 for counter (3 bytes = 6 hex) + 6 for "&cmac="
+        // Offset calculations:
+        // - Length field: 2 bytes (offsets 0-1)
+        // - NDEF header: offset 2 (D1)
+        // - Type length: offset 3 (01)
+        // - Payload length: offset 4
+        // - Type: offset 5 (55 = 'U')
+        // - Prefix code: offset 6
+        // - URL data starts: offset 7
+        
+        int urlDataOffset = 7; // URL data starts at byte 7 in the file
 
-        Log.d(TAG, "SDM Offsets - UID: " + uidOffset + " (0x" + Integer.toHexString(uidOffset) +
-                "), CTR: " + ctrOffset + " (0x" + Integer.toHexString(ctrOffset) +
-                "), CMAC: " + cmacOffset + " (0x" + Integer.toHexString(cmacOffset) + ")");
-        Log.d(TAG, "URL after prefix removal: '" + urlAfterPrefix + "' (len=" + urlAfterPrefix.length() + ")");
+        // Placeholder positions in URL data (relative to urlDataOffset)
+        // URL format: {urlAfterPrefix}?uid=00000000000000&ctr=000000
+        int uidParamStart = urlAfterPrefix.length() + 5; // "?uid=" is 5 chars
+        int ctrParamStart = uidParamStart + 14 + 5;      // 14 hex chars + "&ctr=" (5 chars)
+
+        // Absolute offsets in file
+        int uidOffset = urlDataOffset + uidParamStart;
+        int ctrOffset = urlDataOffset + ctrParamStart;
+
+        Log.d(TAG, "SDM Offsets - UID: " + uidOffset + ", CTR: " + ctrOffset);
+        Log.d(TAG, "URL after prefix: '" + urlAfterPrefix + "' (len=" + urlAfterPrefix.length() + ")");
+        Log.d(TAG, "Full URL will be: " + urlWithParams);
 
         // Build file settings
         ByteArrayOutputStream settings = new ByteArrayOutputStream();
@@ -250,52 +309,105 @@ public class Ntag424DnaProgrammer {
         // 1. FileOption (1 byte): SDM enabled (bit 6), CommMode = Plain (bits 1-0 = 00)
         settings.write(0x40);
 
-        // 2. AccessRights (2 bytes)
-        //    Byte 1: RW access (key 0) || Change access (key 0) = 0x00
-        //    Byte 2: Read access (E=free) || Write access (key 0) = 0xE0
-        settings.write(0x00);
-        settings.write(0xE0);
+        // 2. AccessRights (2 bytes) - per NTAG 424 DNA datasheet section 11.3.2
+        //    Byte 0: bits 7-4 = Read access, bits 3-0 = Write access
+        //    Byte 1: bits 7-4 = Read-Write access, bits 3-0 = Change access
+        //    0 = key 0, E = free, F = no access
+        settings.write(0xE0);  // Read=E (free), Write=0 (needs key 0)
+        settings.write(0xE0);  // RW=E (free), Change=0 (needs key 0)
 
-        // 3. SDMOptions (1 byte): bit 0=SDM, bit 6=UID mirror, bit 7=ReadCtr mirror
-        settings.write(0xC1);
+        // 3. SDMOptions (1 byte): 
+        //    bit 0 = SDM and Mirroring enabled
+        //    bit 4 = ReadCtrLimit enabled (we DON'T want this - no limit)
+        //    bit 5 = Encrypted File Data (0 = no)
+        //    bit 6 = UID mirror
+        //    bit 7 = SDMReadCtr mirror
+        // 0x41 = 0100 0001 = UID mirror + SDM enabled (NO CTR for testing)
+        settings.write(0x41);
 
         // 4. SDMAccessRights (2 bytes):
-        //    Byte 1: SDMCtrRetKey[7:4] || SDMMetaReadKey[3:0]
-        //    Byte 2: SDMFileReadKey[7:4] || SDMCtrIncKey[3:0]
-        //    MetaRead=F(free/plain), FileRead=2(key 2), CtrRet=F(free), CtrInc=F(free)
-        settings.write(0xFF); // CtrRet=F, MetaRead=F
-        settings.write(0x2F); // FileRead=2, CtrInc=F
+        //    Byte 0: [SDMCtrRetKey 4 bits][SDMMetaReadKey 4 bits]
+        //    Byte 1: [SDMFileReadKey 4 bits][SDMCtrIncKey 4 bits]
+        //    F = plain/free/disabled
+        // Using FileReadKey=F means CMAC is disabled (no authentication)
+        // This is simpler for testing - can enable key 2 later
+        settings.write(0xFF);  // CtrRet=F (disabled), MetaRead=F (plain UID mirror)
+        settings.write(0xFF);  // FileRead=F (no CMAC), CtrInc=F (free increment)
 
-        // 5. UIDOffset (3 bytes LE) - present because SDMOptions bit 6 = 1
+        // 5. UIDOffset (3 bytes LE) - where UID placeholder is
         writeOffset(settings, uidOffset);
 
-        // 6. SDMReadCtrOffset (3 bytes LE) - present because SDMOptions bit 7 = 1
-        writeOffset(settings, ctrOffset);
-
-        // 7. SDMMACInputOffset (3 bytes LE) - always present
-        //    Start of data used for CMAC calculation
-        writeOffset(settings, uidOffset);
-
-        // 8. SDMMACOffset (3 bytes LE) - always present
-        //    Where the CMAC placeholder is in the file
-        writeOffset(settings, cmacOffset);
-
-        // NO PICCDataOffset - because SDMMetaReadKey = 0xF (plain mirroring)
-        // NO SDMENCOffset/Length - because no encrypted file data
-        // NO SDMReadCtrLimit - because SDMOptions bit 1 = 0
+        // NOTE: With only UID mirroring (no CTR), we don't include SDMReadCtrOffset
+        // Also no SDMMACInputOffset, SDMMACOffset when FileReadKey=F
 
         byte[] settingsData = settings.toByteArray();
         Log.d(TAG, "ChangeFileSettings data (" + settingsData.length + " bytes): " +
                 AesUtils.bytesToHex(settingsData));
 
-        // Build command: FileNo || SettingsData
-        byte[] cmdData = new byte[1 + settingsData.length];
-        cmdData[0] = Ntag424DnaCommands.FILE_NDEF;
-        System.arraycopy(settingsData, 0, cmdData, 1, settingsData.length);
-
-        auth.sendMacCommand(Ntag424DnaCommands.CMD_CHANGE_FILE_SETTINGS, cmdData);
+        // Build command: FileNo is the header, settings are encrypted
+        // ChangeFileSettings with Change access = key 0 requires encrypted data
+        byte[] header = new byte[]{Ntag424DnaCommands.FILE_NDEF};
+        
+        auth.sendEncryptedCommand(Ntag424DnaCommands.CMD_CHANGE_FILE_SETTINGS, header, settingsData);
 
         Log.d(TAG, "SDM configured successfully");
+    }
+
+    /**
+     * Configures SDM in PLAIN mode (before authentication)
+     * Use when Change access = E (free)
+     */
+    private void configureSdmPlain(String baseUrl) throws Exception {
+        // Build the same settings data as configureSdm
+        String urlAfterPrefix = baseUrl.replace("http://", "").replace("https://", "");
+        String urlWithParams = urlAfterPrefix + "?uid=00000000000000&ctr=000000";
+        
+        int urlDataOffset = 7;
+        int uidParamStart = urlAfterPrefix.length() + 5;
+        int ctrParamStart = uidParamStart + 14 + 5;
+        int uidOffset = urlDataOffset + uidParamStart;
+        int ctrOffset = urlDataOffset + ctrParamStart;
+
+        Log.d(TAG, "SDM Plain - UID offset: " + uidOffset + ", CTR offset: " + ctrOffset);
+
+        ByteArrayOutputStream settings = new ByteArrayOutputStream();
+        
+        // FileOption: SDM enabled (0x40), CommMode plain
+        settings.write(0x40);
+        
+        // AccessRights: Read=E, Write=0, RW=E, Change=0
+        settings.write(0xE0);
+        settings.write(0xE0);
+        
+        // SDMOptions: UID mirror + ReadCtr mirror + SDM enabled = 0xC1
+        settings.write(0xC1);
+        
+        // SDMAccessRights: all F = plain/free
+        settings.write(0xFF);
+        settings.write(0xFF);
+        
+        // UIDOffset (3 bytes LE)
+        writeOffset(settings, uidOffset);
+        
+        // SDMReadCtrOffset (3 bytes LE)
+        writeOffset(settings, ctrOffset);
+
+        byte[] settingsData = settings.toByteArray();
+        Log.d(TAG, "ChangeFileSettings PLAIN data (" + settingsData.length + " bytes): " +
+                AesUtils.bytesToHex(settingsData));
+
+        // Build command data: FileNo + settings (NO encryption, NO MAC)
+        ByteArrayOutputStream cmdData = new ByteArrayOutputStream();
+        cmdData.write(Ntag424DnaCommands.FILE_NDEF);
+        cmdData.write(settingsData);
+
+        byte[] response = commands.transceive(Ntag424DnaCommands.CMD_CHANGE_FILE_SETTINGS, cmdData.toByteArray());
+        
+        if (!commands.isOk(response)) {
+            throw new Exception("ChangeFileSettings (plain) failed: " + AesUtils.bytesToHex(commands.getStatus(response)));
+        }
+        
+        Log.d(TAG, "SDM configured successfully (plain mode)!");
     }
 
     private void writeOffset(ByteArrayOutputStream out, int offset) {
@@ -305,20 +417,79 @@ public class Ntag424DnaProgrammer {
     }
 
     /**
-     * Writes NDEF URL message with SDM placeholders
+     * Builds NDEF message with SDM placeholders
+     * NOTE: For simplified testing, we only use UID and CTR (no CMAC)
      */
-    private void writeNdefWithSdm(String baseUrl) throws Exception {
-        // Build NDEF message
-        // URL with placeholders: baseUrl?uid=00000000000000&ctr=000000&cmac=0000000000000000
-
+    private byte[] buildNdefMessage(String baseUrl) {
         String fullUrl = baseUrl +
-                "?uid=00000000000000" +  // 14 chars placeholder for UID
-                "&ctr=000000" +           // 6 chars placeholder for counter
-                "&cmac=0000000000000000"; // 16 chars placeholder for CMAC
+                "?uid=00000000000000" +  // 14 chars placeholder for UID (7 bytes hex)
+                "&ctr=000000";            // 6 chars placeholder for counter (3 bytes hex)
+        // NOTE: CMAC removed for simplified testing (SDMFileReadKey=F)
+        return buildNdefUrlRecord(fullUrl);
+    }
 
-        byte[] ndefMessage = buildNdefUrlRecord(fullUrl);
+    /**
+     * Writes NDEF URL message with SDM placeholders.
+     * 
+     * Strategy: The default NDEF file has CommMode=Plain and Write access=E (free).
+     * So we can write without authentication/MAC using plain WriteData command.
+     * After writing, we configure SDM which changes access rights to require key 0.
+     */
+    private void writeNdefPlain(String baseUrl) throws Exception {
+        byte[] ndefMessage = buildNdefMessage(baseUrl);
+        Log.d(TAG, "NDEF message (" + ndefMessage.length + " bytes): " + AesUtils.bytesToHex(ndefMessage));
 
-        // Write to NDEF file
+        // Try writing with MAC first (authenticated session)
+        try {
+            writeNdefWithMac(ndefMessage);
+            Log.d(TAG, "NDEF written successfully with MAC: " + baseUrl);
+            return;
+        } catch (Exception e) {
+            Log.w(TAG, "WriteData with MAC failed: " + e.getMessage() + ", trying plain...");
+        }
+
+        // If MAC write fails, try plain write (for default file settings)
+        writeNdefWithoutMac(ndefMessage);
+        Log.d(TAG, "NDEF written successfully (plain): " + baseUrl);
+    }
+
+    /**
+     * Writes NDEF data using authenticated command with MAC
+     */
+    private void writeNdefWithMac(byte[] ndefMessage) throws Exception {
+        Log.d(TAG, "writeNdefWithMac: " + ndefMessage.length + " bytes");
+        
+        // WriteData format: FileNo || Offset (3 LE) || Length (3 LE) || Data
+        ByteArrayOutputStream cmdData = new ByteArrayOutputStream();
+        cmdData.write(Ntag424DnaCommands.FILE_NDEF);
+
+        // Offset (3 bytes LE)
+        cmdData.write(0x00);
+        cmdData.write(0x00);
+        cmdData.write(0x00);
+
+        // Length (3 bytes LE) - number of bytes to write
+        cmdData.write(ndefMessage.length & 0xFF);
+        cmdData.write((ndefMessage.length >> 8) & 0xFF);
+        cmdData.write((ndefMessage.length >> 16) & 0xFF);
+
+        // Data
+        cmdData.write(ndefMessage);
+        
+        Log.d(TAG, "WriteData command data (before MAC): " + AesUtils.bytesToHex(cmdData.toByteArray()));
+
+        // Send with MAC
+        auth.sendMacCommand(Ntag424DnaCommands.CMD_WRITE_DATA, cmdData.toByteArray());
+    }
+
+    /**
+     * Writes NDEF data using plain command (no MAC, no encryption)
+     * Works when file has CommMode=Plain and Write access=Free (0xE)
+     */
+    private void writeNdefWithoutMac(byte[] ndefMessage) throws Exception {
+        Log.d(TAG, "writeNdefWithoutMac: " + ndefMessage.length + " bytes");
+        
+        // WriteData format: FileNo || Offset (3 LE) || Length (3 LE) || Data
         ByteArrayOutputStream cmdData = new ByteArrayOutputStream();
         cmdData.write(Ntag424DnaCommands.FILE_NDEF);
 
@@ -335,9 +506,21 @@ public class Ntag424DnaProgrammer {
         // Data
         cmdData.write(ndefMessage);
 
-        auth.sendMacCommand(Ntag424DnaCommands.CMD_WRITE_DATA, cmdData.toByteArray());
+        Log.d(TAG, "WriteData command (plain, no MAC): " + AesUtils.bytesToHex(cmdData.toByteArray()));
 
-        Log.d(TAG, "NDEF written: " + fullUrl);
+        // Send plain (no MAC)
+        byte[] response = commands.transceive(Ntag424DnaCommands.CMD_WRITE_DATA, cmdData.toByteArray());
+        if (!commands.isOk(response)) {
+            throw new Exception("Plain WriteData failed: " + AesUtils.bytesToHex(commands.getStatus(response)));
+        }
+        Log.d(TAG, "WriteData (plain) succeeded!");
+    }
+
+    /**
+     * Writes NDEF URL message with SDM placeholders (legacy method with MAC)
+     */
+    private void writeNdefWithSdm(String baseUrl) throws Exception {
+        writeNdefPlain(baseUrl);
     }
 
     /**
@@ -478,44 +661,47 @@ public class Ntag424DnaProgrammer {
         callback.onProgress("Tag identified: " + version.getUidHex());
 
         // Authenticate with current master key
-        callback.onProgress("Authenticating...");
+        callback.onProgress("Authenticating with custom key...");
         byte[] currentMasterKey = AesUtils.hexToBytes(keys.appMasterKey);
-        byte[] currentMetaReadKey = AesUtils.hexToBytes(keys.sdmMetaReadKey);
-        byte[] currentFileReadKey = AesUtils.hexToBytes(keys.sdmFileReadKey);
         byte[] defaultKey = Ntag424DnaCommands.DEFAULT_KEY;
 
         if (!auth.authenticateEV2First(KEY_APP_MASTER, currentMasterKey)) {
-            throw new Exception("Authentication failed. Tag may have different keys.");
+            throw new Exception("Authentication failed. Wrong master key provided.");
         }
-        callback.onProgress("Authenticated");
+        callback.onProgress("Authenticated with custom key");
 
-        // Reset keys to default (order: other keys first, then master)
-        callback.onProgress("Resetting SDM Meta Read key...");
-        auth.changeKey(KEY_SDM_META_READ, currentMetaReadKey, defaultKey, (byte) 0x00);
+        // Step 1: Change master key to default FIRST (while we're still authenticated)
+        callback.onProgress("Resetting master key to default...");
+        auth.changeKey(KEY_APP_MASTER, currentMasterKey, defaultKey, (byte) 0x00);
+        Log.d(TAG, "Master key reset to default");
 
-        callback.onProgress("Resetting SDM File Read key...");
-        auth.changeKey(KEY_SDM_FILE_READ, currentFileReadKey, defaultKey, (byte) 0x00);
+        // Step 2: Re-authenticate with default key
+        callback.onProgress("Re-authenticating with default key...");
+        if (!auth.authenticateEV2First(KEY_APP_MASTER, defaultKey)) {
+            throw new Exception("Re-authentication with default key failed");
+        }
+        callback.onProgress("Authenticated with default key");
 
-        // Re-authenticate before changing file settings
+        // Step 3: Reset NDEF file settings (disable SDM)
+        try {
+            callback.onProgress("Resetting file settings...");
+            resetFileSettings();
+            Log.d(TAG, "File settings reset");
+        } catch (Exception e) {
+            Log.w(TAG, "Could not reset file settings: " + e.getMessage());
+            // Continue anyway - may already be default
+        }
+
+        // Step 4: Re-authenticate again (cmdCounter may have changed)
         callback.onProgress("Re-authenticating...");
-        if (!auth.authenticateEV2First(KEY_APP_MASTER, currentMasterKey)) {
-            throw new Exception("Re-authentication failed");
+        if (!auth.authenticateEV2First(KEY_APP_MASTER, defaultKey)) {
+            throw new Exception("Re-authentication failed after file settings reset");
         }
 
-        // Reset NDEF file settings (disable SDM)
-        callback.onProgress("Disabling SDM...");
-        resetFileSettings();
-
-        // Clear NDEF data
+        // Step 5: Clear NDEF data
         callback.onProgress("Clearing NDEF...");
         clearNdef();
-
-        // Change master key to default last
-        callback.onProgress("Resetting master key...");
-        if (!auth.authenticateEV2First(KEY_APP_MASTER, currentMasterKey)) {
-            throw new Exception("Re-authentication for master key reset failed");
-        }
-        auth.changeKey(KEY_APP_MASTER, currentMasterKey, defaultKey, (byte) 0x00);
+        Log.d(TAG, "NDEF cleared");
 
         callback.onProgress("Factory reset complete!");
         callback.onSuccess();
@@ -530,9 +716,12 @@ public class Ntag424DnaProgrammer {
         // File option: SDM disabled, communication mode Plain
         settings.write(0x00);
 
-        // Access rights: all free
-        settings.write(0xE0); // Read: free
-        settings.write(0xEE); // Write: free, R/W: free
+        // Access rights (2 bytes) - per NTAG 424 DNA datasheet section 11.3.2
+        // Byte 0: bits 7-4 = Read access, bits 3-0 = Write access  
+        // Byte 1: bits 7-4 = Read-Write access, bits 3-0 = Change access
+        // E = free, 0 = key 0, F = never
+        settings.write(0xEE);  // Read=E (free), Write=E (free)
+        settings.write(0xE0);  // RW=E (free), Change=0 (key 0)
 
         byte[] settingsData = settings.toByteArray();
         byte[] cmdData = new byte[1 + settingsData.length];
