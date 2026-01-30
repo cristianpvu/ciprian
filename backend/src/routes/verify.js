@@ -13,10 +13,6 @@ const router = express.Router();
  * - uid: UID-ul tag-ului (14 caractere hex)
  * - ctr: Counter-ul (6 caractere hex)
  * - cmac: CMAC pentru verificare (16 caractere hex)
- *
- * Query params (encrypted mode - pentru viitor):
- * - enc: Date criptate (conține UID + counter)
- * - cmac: CMAC pentru verificare
  */
 router.get('/', async (req, res) => {
     const { uid, ctr, cmac, enc } = req.query;
@@ -47,10 +43,6 @@ router.get('/', async (req, res) => {
     });
 });
 
-/**
- * Verificare în modul plaintext (sdmMetaReadPerm = ACCESS_EVERYONE)
- * UID și Counter sunt în clar, doar CMAC e pentru verificare
- */
 async function handlePlaintextVerification(req, res, uid, ctr, cmac) {
     try {
         const uidUpper = uid.toUpperCase();
@@ -77,8 +69,6 @@ async function handlePlaintextVerification(req, res, uid, ctr, cmac) {
             });
         }
 
-        // Verifică CMAC folosind sdm_file_read_key (Key3 în exemplul nostru)
-        // Pentru SDM plaintext, MAC-ul se calculează pe: UID || Counter
         const macKey = tag.sdm_file_read_key || '00000000000000000000000000000000';
         const isValidMac = Ntag424Crypto.verifySdmMac(macKey, uid, ctr, cmac);
 
@@ -91,7 +81,6 @@ async function handlePlaintextVerification(req, res, uid, ctr, cmac) {
             });
         }
 
-        // Verificare anti-replay (counter)
         if (counter <= (tag.last_counter || 0)) {
             console.log('Replay detected:', counter, '<=', tag.last_counter);
             await logScan(tag.id, tag.user_id, counter, clientIp, userAgent, false, 'Replay detected');
@@ -101,7 +90,6 @@ async function handlePlaintextVerification(req, res, uid, ctr, cmac) {
             });
         }
 
-        // Actualizează counter-ul
         await supabase
             .from('tags')
             .update({
@@ -111,10 +99,8 @@ async function handlePlaintextVerification(req, res, uid, ctr, cmac) {
             })
             .eq('id', tag.id);
 
-        // Loghează scanarea reușită
         await logScan(tag.id, tag.user_id, counter, clientIp, userAgent, true, null);
 
-        // Succes!
         console.log('Tag verified successfully:', uidUpper);
         res.json({
             valid: true,
@@ -134,10 +120,6 @@ async function handlePlaintextVerification(req, res, uid, ctr, cmac) {
     }
 }
 
-/**
- * Verificare în modul criptat (sdmMetaReadPerm = ACCESS_KEYx)
- * UID și Counter sunt criptate în 'enc'
- */
 async function handleEncryptedVerification(req, res, enc, cmac) {
     try {
         // Obține toate cipurile pentru a încerca verificarea

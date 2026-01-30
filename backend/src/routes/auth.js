@@ -69,7 +69,6 @@ router.post('/register', async (req, res) => {
 
 /**
  * POST /api/auth/login
- * Login user
  */
 router.post('/login', async (req, res) => {
     try {
@@ -117,7 +116,6 @@ router.post('/login', async (req, res) => {
 
 /**
  * GET /api/auth/me
- * Obține user-ul curent
  */
 router.get('/me', authenticate, async (req, res) => {
     try {

@@ -9,7 +9,6 @@ router.use(authenticate);
 
 /**
  * GET /api/tags
- * Listează cipurile user-ului
  */
 router.get('/', async (req, res) => {
     try {
@@ -43,7 +42,6 @@ router.get('/', async (req, res) => {
 
 /**
  * POST /api/tags
- * Înregistrează un cip nou
  */
 router.post('/', async (req, res) => {
     try {
@@ -61,7 +59,6 @@ router.post('/', async (req, res) => {
             return res.status(400).json({ error: 'Missing required fields' });
         }
 
-        // Verifică dacă UID-ul există deja (global, nu doar pt user)
         const { data: existing } = await supabase
             .from('tags')
             .select('id')
@@ -72,7 +69,6 @@ router.post('/', async (req, res) => {
             return res.status(409).json({ error: 'Tag with this UID already exists' });
         }
 
-        // Inserează tag-ul
         const { data: tag, error } = await supabase
             .from('tags')
             .insert({
@@ -104,7 +100,6 @@ router.post('/', async (req, res) => {
 
 /**
  * GET /api/tags/:id
- * Detalii despre un cip
  */
 router.get('/:id', async (req, res) => {
     try {
@@ -138,7 +133,6 @@ router.get('/:id', async (req, res) => {
 
 /**
  * GET /api/tags/:id/keys
- * Obține cheile unui cip (pentru factory reset)
  */
 router.get('/:id/keys', async (req, res) => {
     try {
@@ -169,7 +163,6 @@ router.get('/:id/keys', async (req, res) => {
 
 /**
  * DELETE /api/tags/:id
- * Șterge un cip
  */
 router.delete('/:id', async (req, res) => {
     try {
