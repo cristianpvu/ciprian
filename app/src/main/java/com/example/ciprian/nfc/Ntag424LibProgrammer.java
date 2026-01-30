@@ -23,11 +23,11 @@ import java.security.SecureRandom;
 
 /**
  * NTAG 424 DNA programmer using the johnnyb/ntag424-java library.
- * Handles SDM configuration for dynamic URL generation.
+ * This is a cleaner implementation that leverages the well-tested library.
  */
-public class Ntag424DnaProgrammer {
+public class Ntag424LibProgrammer {
 
-    private static final String TAG = "NTAG424Programmer";
+    private static final String TAG = "NTAG424LibProgrammer";
 
     private IsoDep isoDep;
     private DnaCommunicator communicator;
@@ -36,12 +36,6 @@ public class Ntag424DnaProgrammer {
         void onProgress(String message, int progress);
         void onError(String error);
         void onSuccess(ProgrammingResult result);
-    }
-
-    public interface ResetCallback {
-        void onProgress(String message);
-        void onError(String error);
-        void onSuccess();
     }
 
     /**
@@ -95,7 +89,7 @@ public class Ntag424DnaProgrammer {
         info.hasDefaultKeys = (keyVersion == 0);
         Log.d(TAG, "Key version: " + keyVersion + ", hasDefaultKeys: " + info.hasDefaultKeys);
 
-        // Try to get UID (needs auth with factory key for virgin tags)
+        // Try to get UID (needs auth)
         try {
             if (AESEncryptionMode.authenticateEV2(communicator, 0, Ntag424.FACTORY_KEY)) {
                 byte[] uid = GetCardUid.run(communicator);
@@ -103,14 +97,8 @@ public class Ntag424DnaProgrammer {
                 Log.d(TAG, "UID: " + info.uid);
             }
         } catch (Exception e) {
-            Log.w(TAG, "Could not get UID with default key: " + e.getMessage());
-            info.uid = "UNKNOWN";
+            Log.w(TAG, "Could not get UID: " + e.getMessage());
         }
-
-        // Fill in other info
-        info.hardwareVersion = "4.0";
-        info.softwareVersion = "4.0";
-        info.storageSize = 256;
 
         return info;
     }
@@ -158,24 +146,23 @@ public class Ntag424DnaProgrammer {
         Log.d(TAG, "Card UID: " + uidHex);
         callback.onProgress("UID: " + uidHex, 25);
 
-        // Create SDM settings - EXACTLY like the official example
+        // Create SDM settings
         callback.onProgress("Configuring SDM...", 35);
         SDMSettings sdmSettings = new SDMSettings();
         
-        // EXACTLY like official example:
-        // sdmMetaReadPerm = KEY2 for encrypted PICC data
-        // sdmFileReadPerm = KEY3 for MAC and file encryption
-        sdmSettings.sdmMetaReadPerm = Permissions.ACCESS_KEY2;  // Encrypted PICC data with Key2
-        sdmSettings.sdmFileReadPerm = Permissions.ACCESS_KEY3;  // MAC with Key3
-        sdmSettings.sdmOptionUid = true;
-        sdmSettings.sdmOptionReadCounter = true;
+        // UID and Counter in plaintext, MAC for verification
+        // sdmMetaReadPerm = ACCESS_EVERYONE means UID/Counter are NOT encrypted
+        // sdmFileReadPerm is for MAC calculation
+        sdmSettings.sdmMetaReadPerm = Permissions.ACCESS_EVERYONE;  // Plain UID/Counter
+        sdmSettings.sdmFileReadPerm = Permissions.ACCESS_EVERYONE;  // Use default key for MAC
+        sdmSettings.sdmReadCounterRetrievalPerm = Permissions.ACCESS_NONE;
 
-        // Create NDEF template - use the user's configured URL
+        // Create NDEF template with UID, Counter, and MAC placeholders
         NdefTemplateMaster master = new NdefTemplateMaster();
         master.usesLRP = false;  // We're using AES, not LRP
 
-        // Use the configured base URL with SDM placeholders
-        // Format: baseUrl?uid={UID}&ctr={COUNTER}&cmac={MAC}
+        // Build URL with placeholders - library will calculate correct offsets
+        // Format: baseUrl?uid=XXXXXX&ctr=XXXXXX&cmac=XXXXXXXX
         String urlTemplate = config.baseUrl + "?uid={UID}&ctr={COUNTER}&cmac={MAC}";
         Log.d(TAG, "URL Template: " + urlTemplate);
 
@@ -192,41 +179,20 @@ public class Ntag424DnaProgrammer {
         callback.onProgress("Updating file settings...", 65);
         FileSettings ndefFileSettings = GetFileSettings.run(communicator, Ntag424.NDEF_FILE_NUMBER);
         Log.d(TAG, "Current file settings retrieved");
-        Log.d(TAG, "Before SDM - readPerm: " + ndefFileSettings.readPerm + 
-                   ", writePerm: " + ndefFileSettings.writePerm +
-                   ", readWritePerm: " + ndefFileSettings.readWritePerm +
-                   ", changePerm: " + ndefFileSettings.changePerm +
-                   ", commMode: " + ndefFileSettings.commMode);
 
-        // DON'T change the access permissions - keep them as they are!
-        // Only apply the SDM settings
+        // Update with SDM settings
         ndefFileSettings.sdmSettings = sdmSettings;
-        
-        Log.d(TAG, "After SDM - readPerm: " + ndefFileSettings.readPerm + 
-                   ", writePerm: " + ndefFileSettings.writePerm +
-                   ", readWritePerm: " + ndefFileSettings.readWritePerm +
-                   ", changePerm: " + ndefFileSettings.changePerm);
-        Log.d(TAG, "SDM settings - sdmEnabled: " + sdmSettings.sdmEnabled +
-                   ", sdmMetaReadPerm: " + sdmSettings.sdmMetaReadPerm + 
-                   ", sdmFileReadPerm: " + sdmSettings.sdmFileReadPerm);
-        Log.d(TAG, "SDM options - sdmOptionUid: " + sdmSettings.sdmOptionUid +
-                   ", sdmOptionReadCounter: " + sdmSettings.sdmOptionReadCounter +
-                   ", sdmOptionUseAscii: " + sdmSettings.sdmOptionUseAscii);
-        Log.d(TAG, "SDM offsets - uidOffset: " + sdmSettings.sdmUidOffset + 
-                   ", counterOffset: " + sdmSettings.sdmReadCounterOffset +
-                   ", piccDataOffset: " + sdmSettings.sdmPiccDataOffset +
-                   ", macInputOffset: " + sdmSettings.sdmMacInputOffset +
-                   ", macOffset: " + sdmSettings.sdmMacOffset);
 
         // Apply new file settings
         ChangeFileSettings.run(communicator, Ntag424.NDEF_FILE_NUMBER, ndefFileSettings);
         Log.d(TAG, "File settings updated with SDM");
 
-        // Generate new master key
+        // Change master key (optional, for production use)
         byte[] newMasterKey;
         if (config.appMasterKey != null) {
             newMasterKey = config.appMasterKey;
         } else {
+            // Generate random key
             newMasterKey = generateRandomKey();
         }
 
@@ -250,21 +216,22 @@ public class Ntag424DnaProgrammer {
     /**
      * Factory reset - restores default keys
      */
-    public void factoryReset(TagKeys keys, ResetCallback callback) {
+    public void factoryReset(byte[] currentMasterKey, ProgressCallback callback) {
         new Thread(() -> {
             try {
-                byte[] masterKey = hexToBytes(keys.appMasterKey);
-
-                callback.onProgress("Authenticating...");
-                if (!AESEncryptionMode.authenticateEV2(communicator, 0, masterKey)) {
-                    throw new Exception("Authentication failed. Wrong key?");
+                callback.onProgress("Authenticating...", 20);
+                if (!AESEncryptionMode.authenticateEV2(communicator, 0, currentMasterKey)) {
+                    throw new Exception("Authentication failed");
                 }
 
-                callback.onProgress("Restoring default key...");
-                ChangeKey.run(communicator, 0, masterKey, Ntag424.FACTORY_KEY, (byte) 0x00);
+                callback.onProgress("Restoring default key...", 60);
+                ChangeKey.run(communicator, 0, currentMasterKey, Ntag424.FACTORY_KEY, (byte) 0x00);
 
-                callback.onProgress("Factory reset complete!");
-                callback.onSuccess();
+                callback.onProgress("Factory reset complete!", 100);
+
+                ProgrammingResult result = new ProgrammingResult();
+                result.appMasterKey = bytesToHex(Ntag424.FACTORY_KEY);
+                callback.onSuccess(result);
 
             } catch (Exception e) {
                 Log.e(TAG, "Factory reset failed", e);
@@ -290,17 +257,7 @@ public class Ntag424DnaProgrammer {
         return sb.toString();
     }
 
-    private byte[] hexToBytes(String hex) {
-        int len = hex.length();
-        byte[] data = new byte[len / 2];
-        for (int i = 0; i < len; i += 2) {
-            data[i / 2] = (byte) ((Character.digit(hex.charAt(i), 16) << 4)
-                    + Character.digit(hex.charAt(i + 1), 16));
-        }
-        return data;
-    }
-
-    // Inner classes for compatibility with existing Activity
+    // Inner classes for compatibility
 
     public static class TagInfo {
         public String uid;
@@ -324,11 +281,5 @@ public class Ntag424DnaProgrammer {
         public String sdmMetaReadKey;
         public String sdmFileReadKey;
         public String baseUrl;
-    }
-
-    public static class TagKeys {
-        public String appMasterKey;
-        public String sdmMetaReadKey;
-        public String sdmFileReadKey;
     }
 }

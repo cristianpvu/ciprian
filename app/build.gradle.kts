@@ -61,6 +61,9 @@ dependencies {
     // Security
     implementation(libs.security.crypto)
 
+    // NTAG 424 DNA library
+    implementation(files("libs/ntag424.jar"))
+
     // Testing
     testImplementation(libs.junit)
     androidTestImplementation(libs.ext.junit)
