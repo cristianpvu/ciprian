@@ -102,39 +102,75 @@ class Ntag424Crypto {
         return { uid, counter };
     }
 
-    static verifySdmMac(fileReadKeyHex, uid, counter, cmacHex) {
-        // Build session vector
-        const sv = Buffer.alloc(16);
-        sv[0] = 0x3C;
-        sv[1] = 0xC3;
-        sv[2] = 0x00;
-        sv[3] = 0x01;
-        sv[4] = 0x00;
-        sv[5] = 0x80;
+    /**
+     * Verifică CMAC pentru SDM în modul plaintext
+     * Când sdmMetaReadPerm = ACCESS_EVERYONE, UID și Counter sunt în clar
+     * 
+     * @param {string} fileReadKeyHex - Cheia pentru MAC (Key3 - factory key = 00...00)
+     * @param {string} uidHex - UID în hex (14 caractere)
+     * @param {string} ctrHex - Counter în hex (6 caractere)
+     * @param {string} cmacHex - CMAC primit (16 caractere)
+     */
+    static verifySdmMac(fileReadKeyHex, uidHex, ctrHex, cmacHex) {
+        try {
+            // Parse UID și counter
+            const uid = this.hexToBytes(uidHex);
+            const counterValue = parseInt(ctrHex, 16);
+            
+            // Counter în format little-endian (3 bytes)
+            const counter = Buffer.alloc(3);
+            counter[0] = counterValue & 0xFF;
+            counter[1] = (counterValue >> 8) & 0xFF;
+            counter[2] = (counterValue >> 16) & 0xFF;
 
-        const uidBytes = this.hexToBytes(uid);
-        uidBytes.copy(sv, 6, 0, 7);
+            // Construiește Session Vector (SV) conform NXP AN12196
+            // SV = 3C || C3 || 00 || 01 || 00 || 80 || UID (7 bytes) || Counter (3 bytes)
+            const sv = Buffer.alloc(16);
+            sv[0] = 0x3C;
+            sv[1] = 0xC3;
+            sv[2] = 0x00;
+            sv[3] = 0x01;
+            sv[4] = 0x00;
+            sv[5] = 0x80;
+            uid.copy(sv, 6, 0, 7);
+            counter.copy(sv, 13, 0, 3);
 
-        sv[13] = counter & 0xFF;
-        sv[14] = (counter >> 8) & 0xFF;
-        sv[15] = (counter >> 16) & 0xFF;
+            // Derivă Session Key: SessionKey = CMAC(FileReadKey, SV)
+            const sessionKey = this.calculateCmac(fileReadKeyHex, sv);
+            const sessionKeyHex = this.bytesToHex(sessionKey);
 
-        // Derive session key
-        const sessionKey = this.calculateCmac(fileReadKeyHex, sv);
-        const sessionKeyHex = this.bytesToHex(sessionKey);
+            // Pentru SDM plaintext fără encrypted file data:
+            // MAC se calculează pe datele de la SDMMACInputOffset până la SDMMACOffset
+            // În cazul nostru (fără ^), MAC-ul e calculat doar pe PICC data
+            // Dar în modul plaintext cu sdmMacInputOffset == sdmMacOffset, e pe nimic (empty)
+            
+            // Calculează CMAC pe date goale (zero-length MAC input)
+            const calculatedMac = this.calculateCmac(sessionKeyHex, Buffer.alloc(0));
 
-        // Calculate CMAC over empty data
-        const calculatedMac = this.calculateCmac(sessionKeyHex, Buffer.alloc(0));
+            // Truncate: ia bytes de pe pozițiile impare (1, 3, 5, 7, 9, 11, 13, 15)
+            const truncated = Buffer.alloc(8);
+            for (let i = 0; i < 8; i++) {
+                truncated[i] = calculatedMac[i * 2 + 1];
+            }
 
-        // Truncate (take odd bytes)
-        const truncated = Buffer.alloc(8);
-        for (let i = 0; i < 8; i++) {
-            truncated[i] = calculatedMac[i * 2 + 1];
+            const providedMac = this.hexToBytes(cmacHex);
+
+            console.log('MAC Verification:');
+            console.log('  UID:', uidHex);
+            console.log('  Counter:', ctrHex, '=', counterValue);
+            console.log('  Key:', fileReadKeyHex);
+            console.log('  SV:', this.bytesToHex(sv));
+            console.log('  SessionKey:', sessionKeyHex);
+            console.log('  Calculated MAC (full):', this.bytesToHex(calculatedMac));
+            console.log('  Calculated MAC (truncated):', this.bytesToHex(truncated));
+            console.log('  Provided MAC:', cmacHex);
+            console.log('  Match:', truncated.equals(providedMac));
+
+            return truncated.equals(providedMac);
+        } catch (error) {
+            console.error('verifySdmMac error:', error);
+            return false;
         }
-
-        const providedMac = this.hexToBytes(cmacHex);
-
-        return truncated.equals(providedMac);
     }
 
     static verifySdm(metaReadKeyHex, fileReadKeyHex, encHex, cmacHex) {
