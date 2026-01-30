@@ -222,7 +222,20 @@ public class Ntag424DnaProgrammer {
         ChangeFileSettings.run(communicator, Ntag424.NDEF_FILE_NUMBER, ndefFileSettings);
         Log.d(TAG, "File settings updated with SDM");
 
-        // Generate new master key
+        // Generate new MAC key (Key3) - THIS IS THE SECURITY KEY!
+        byte[] newMacKey;
+        if (config.sdmFileReadKey != null) {
+            newMacKey = config.sdmFileReadKey;
+        } else {
+            newMacKey = generateRandomKey();
+        }
+
+        callback.onProgress("Changing MAC key (Key3)...", 75);
+        // Change Key3 (MAC key) - requires auth with Key0
+        ChangeKey.run(communicator, 3, Ntag424.FACTORY_KEY, newMacKey, (byte) 0x01);
+        Log.d(TAG, "MAC key (Key3) changed");
+
+        // Generate new master key (Key0)
         byte[] newMasterKey;
         if (config.appMasterKey != null) {
             newMasterKey = config.appMasterKey;
@@ -230,18 +243,18 @@ public class Ntag424DnaProgrammer {
             newMasterKey = generateRandomKey();
         }
 
-        callback.onProgress("Changing master key...", 85);
+        callback.onProgress("Changing master key (Key0)...", 90);
         ChangeKey.run(communicator, 0, currentKey, newMasterKey, (byte) 0x01);
-        Log.d(TAG, "Master key changed");
+        Log.d(TAG, "Master key (Key0) changed");
 
         callback.onProgress("Programming complete!", 100);
 
-        // Build result
+        // Build result - IMPORTANT: save these keys!
         ProgrammingResult result = new ProgrammingResult();
         result.uid = uidHex;
         result.appMasterKey = bytesToHex(newMasterKey);
-        result.sdmMetaReadKey = bytesToHex(Ntag424.FACTORY_KEY);
-        result.sdmFileReadKey = bytesToHex(Ntag424.FACTORY_KEY);
+        result.sdmMetaReadKey = bytesToHex(Ntag424.FACTORY_KEY);  // Not used in plaintext mode
+        result.sdmFileReadKey = bytesToHex(newMacKey);  // THIS IS THE SECRET!
         result.baseUrl = config.baseUrl;
 
         callback.onSuccess(result);
@@ -315,6 +328,7 @@ public class Ntag424DnaProgrammer {
     public static class ProgrammingConfig {
         public String baseUrl;          // Base URL for SDM
         public byte[] appMasterKey;     // New master key (or null for random)
+        public byte[] sdmFileReadKey;   // New MAC key (Key3) - or null for random
         public byte[] currentKey;       // Current key if already programmed
     }
 
