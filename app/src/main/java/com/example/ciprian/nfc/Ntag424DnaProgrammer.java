@@ -222,32 +222,55 @@ public class Ntag424DnaProgrammer {
         ChangeFileSettings.run(communicator, Ntag424.NDEF_FILE_NUMBER, ndefFileSettings);
         Log.d(TAG, "File settings updated with SDM");
 
-        // Generate new MAC key (Key3) - THIS IS THE SECURITY KEY!
+        // Check if Key3 is already changed (key version != 0)
+        int key3Version = GetKeyVersion.run(communicator, 3);
+        Log.d(TAG, "Key3 version: " + key3Version);
+
         byte[] newMacKey;
-        if (config.sdmFileReadKey != null) {
-            newMacKey = config.sdmFileReadKey;
+        if (key3Version == 0) {
+            // Key3 is still factory key - we can change it
+            if (config.sdmFileReadKey != null) {
+                newMacKey = config.sdmFileReadKey;
+            } else {
+                newMacKey = generateRandomKey();
+            }
+
+            callback.onProgress("Changing MAC key (Key3)...", 75);
+            ChangeKey.run(communicator, 3, Ntag424.FACTORY_KEY, newMacKey, (byte) 0x01);
+            Log.d(TAG, "MAC key (Key3) changed to: " + bytesToHex(newMacKey));
         } else {
-            newMacKey = generateRandomKey();
+            // Key3 already changed - skip and use existing (must be provided in config)
+            Log.d(TAG, "Key3 already changed (version=" + key3Version + "), keeping existing");
+            if (config.sdmFileReadKey != null) {
+                newMacKey = config.sdmFileReadKey;
+            } else {
+                // Can't generate new - we don't know the old key!
+                throw new Exception("Key3 already changed but no sdmFileReadKey provided in config");
+            }
         }
 
-        callback.onProgress("Changing MAC key (Key3)...", 75);
-        // Change Key3 (MAC key) - requires auth with Key0
-        ChangeKey.run(communicator, 3, Ntag424.FACTORY_KEY, newMacKey, (byte) 0x01);
-        Log.d(TAG, "MAC key (Key3) changed");
+        // Check if Key0 is already changed
+        int key0Version = GetKeyVersion.run(communicator, 0);
+        Log.d(TAG, "Key0 version: " + key0Version);
 
-        // Generate new master key (Key0)
         byte[] newMasterKey;
-        if (config.appMasterKey != null) {
-            newMasterKey = config.appMasterKey;
+        if (key0Version == 0 || hasDefaultKeys) {
+            // Key0 is factory or we have the current key
+            if (config.appMasterKey != null) {
+                newMasterKey = config.appMasterKey;
+            } else {
+                newMasterKey = generateRandomKey();
+            }
+
+            callback.onProgress("Changing master key (Key0)...", 90);
+            ChangeKey.run(communicator, 0, currentKey, newMasterKey, (byte) 0x01);
+            Log.d(TAG, "Master key (Key0) changed");
         } else {
-            newMasterKey = generateRandomKey();
+            Log.d(TAG, "Key0 already changed (version=" + key0Version + "), keeping existing");
+            newMasterKey = currentKey;
         }
 
-        callback.onProgress("Changing master key (Key0)...", 90);
-        ChangeKey.run(communicator, 0, currentKey, newMasterKey, (byte) 0x01);
-        Log.d(TAG, "Master key (Key0) changed");
-
-        callback.onProgress("Programming complete!", 100);
+        callback.onProgress("Programming complete!", 100);;
 
         // Build result - IMPORTANT: save these keys!
         ProgrammingResult result = new ProgrammingResult();
@@ -261,20 +284,35 @@ public class Ntag424DnaProgrammer {
     }
 
     /**
-     * Factory reset - restores default keys
+     * Factory reset - restores ALL keys to default
      */
     public void factoryReset(TagKeys keys, ResetCallback callback) {
         new Thread(() -> {
             try {
                 byte[] masterKey = hexToBytes(keys.appMasterKey);
+                byte[] macKey = keys.sdmFileReadKey != null ? 
+                    hexToBytes(keys.sdmFileReadKey) : Ntag424.FACTORY_KEY;
 
                 callback.onProgress("Authenticating...");
                 if (!AESEncryptionMode.authenticateEV2(communicator, 0, masterKey)) {
                     throw new Exception("Authentication failed. Wrong key?");
                 }
 
-                callback.onProgress("Restoring default key...");
+                // Reset Key3 (MAC key) first - while we're still authenticated with Key0
+                callback.onProgress("Restoring Key3 (MAC key)...");
+                int key3Version = GetKeyVersion.run(communicator, 3);
+                if (key3Version != 0) {
+                    // Key3 was changed, reset it
+                    ChangeKey.run(communicator, 3, macKey, Ntag424.FACTORY_KEY, (byte) 0x00);
+                    Log.d(TAG, "Key3 reset to factory");
+                } else {
+                    Log.d(TAG, "Key3 already factory");
+                }
+
+                // Reset Key0 (master key) last
+                callback.onProgress("Restoring Key0 (master key)...");
                 ChangeKey.run(communicator, 0, masterKey, Ntag424.FACTORY_KEY, (byte) 0x00);
+                Log.d(TAG, "Key0 reset to factory");
 
                 callback.onProgress("Factory reset complete!");
                 callback.onSuccess();
