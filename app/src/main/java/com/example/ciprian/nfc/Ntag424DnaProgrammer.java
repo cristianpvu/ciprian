@@ -264,7 +264,7 @@ public class Ntag424DnaProgrammer {
 
             callback.onProgress("Changing master key (Key0)...", 90);
             ChangeKey.run(communicator, 0, currentKey, newMasterKey, (byte) 0x01);
-            Log.d(TAG, "Master key (Key0) changed");
+            Log.d(TAG, "Master key (Key0) changed to: " + bytesToHex(newMasterKey));
         } else {
             Log.d(TAG, "Key0 already changed (version=" + key0Version + "), keeping existing");
             newMasterKey = currentKey;

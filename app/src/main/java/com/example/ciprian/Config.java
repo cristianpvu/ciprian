@@ -8,7 +8,7 @@ public final class Config {
 
     private Config() {}
 
-    public static final String API_URL = "https://ntag-verify-api.vercel.app";
+    public static final String API_URL = "https://ntag-verify.dinedroid.com";
 
     // URL-ul pentru verificarea cipurilor
     public static final String VERIFY_URL = API_URL + "/verify";
