@@ -140,6 +140,49 @@ public class ApiClient {
         storage.clear();
     }
 
+    /**
+     * Preflight înainte de programare: verifică într-un singur apel că
+     * serverul răspunde, token-ul e valid (nu expirat) și user-ul există
+     * în baza de date. Foloseste GET /api/auth/me.
+     *
+     * Daca asta esueaza, NU trebuie sa atingem cipul - altfel ramane
+     * programat dar nesalvat in DB (si pierdut).
+     */
+    public void preflight(ApiCallback<User> callback) {
+        String token = storage.getAuthToken();
+        if (token == null) {
+            callback.onError("Not logged in");
+            return;
+        }
+
+        Request request = new Request.Builder()
+                .url(Config.API_URL + "/api/auth/me")
+                .addHeader("Authorization", "Bearer " + token)
+                .get()
+                .build();
+
+        client.newCall(request).enqueue(new Callback() {
+            @Override
+            public void onFailure(Call call, IOException e) {
+                Log.e(TAG, "Preflight failed", e);
+                callback.onError("Cannot reach server: " + e.getMessage());
+            }
+
+            @Override
+            public void onResponse(Call call, Response response) throws IOException {
+                String bodyStr = response.body() != null ? response.body().string() : "";
+                if (response.isSuccessful()) {
+                    MeResponse resp = gson.fromJson(bodyStr, MeResponse.class);
+                    callback.onSuccess(resp != null ? resp.user : null);
+                } else {
+                    ErrorResponse error = gson.fromJson(bodyStr, ErrorResponse.class);
+                    callback.onError(error != null && error.error != null
+                            ? error.error : ("Server error: " + response.code()));
+                }
+            }
+        });
+    }
+
     // ==================== TAGS ====================
 
     /**
@@ -209,6 +252,46 @@ public class ApiClient {
                     String errorBody = response.body() != null ? response.body().string() : "";
                     ErrorResponse error = gson.fromJson(errorBody, ErrorResponse.class);
                     callback.onError(error != null && error.error != null ? error.error : "Failed to register tag");
+                }
+            }
+        });
+    }
+
+    /**
+     * Reserve-first: salvează cheile în backend ÎNAINTE de a scrie pe cip.
+     * Răspunsul conține cheile pe care telefonul TREBUIE să le scrie pe cip
+     * (pe retry pot fi cele deja salvate, nu cele propuse acum).
+     */
+    public void reserveTag(ReserveTagRequest tagRequest, ApiCallback<ReserveTagResponse> callback) {
+        String token = storage.getAuthToken();
+        if (token == null) {
+            callback.onError("Not logged in");
+            return;
+        }
+
+        Request request = new Request.Builder()
+                .url(Config.API_URL + "/api/tags/reserve")
+                .addHeader("Authorization", "Bearer " + token)
+                .post(RequestBody.create(gson.toJson(tagRequest), JSON))
+                .build();
+
+        client.newCall(request).enqueue(new Callback() {
+            @Override
+            public void onFailure(Call call, IOException e) {
+                Log.e(TAG, "Reserve tag failed", e);
+                callback.onError("Cannot reach server: " + e.getMessage());
+            }
+
+            @Override
+            public void onResponse(Call call, Response response) throws IOException {
+                String bodyStr = response.body() != null ? response.body().string() : "";
+                if (response.isSuccessful()) {
+                    ReserveTagResponse resp = gson.fromJson(bodyStr, ReserveTagResponse.class);
+                    callback.onSuccess(resp);
+                } else {
+                    ErrorResponse error = gson.fromJson(bodyStr, ErrorResponse.class);
+                    callback.onError(error != null && error.error != null
+                            ? error.error : ("Failed to reserve tag: " + response.code()));
                 }
             }
         });
@@ -314,6 +397,10 @@ public class ApiClient {
         public String error;
     }
 
+    public static class MeResponse {
+        public User user;
+    }
+
     public static class RegisterTagRequest {
         public String uid;
         public String appMasterKey;
@@ -328,6 +415,29 @@ public class ApiClient {
         public boolean success;
         public String tagId;
         public String message;
+    }
+
+    public static class ReserveTagRequest {
+        public String uid;
+        public String appMasterKey;
+        public String sdmMetaReadKey;
+        public String sdmFileReadKey;
+        public String baseUrl;
+        public String name;
+        public String description;
+    }
+
+    public static class ReserveTagResponse {
+        public boolean success;
+        public boolean reused;
+        public String tagId;
+        public String uid;
+        public String name;
+        public String description;
+        public String baseUrl;
+        public String appMasterKey;
+        public String sdmMetaReadKey;
+        public String sdmFileReadKey;
     }
 
     public static class DeleteTagResponse {

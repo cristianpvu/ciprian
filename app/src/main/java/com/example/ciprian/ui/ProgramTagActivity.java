@@ -44,6 +44,10 @@ public class ProgramTagActivity extends AppCompatActivity {
     private Ntag424DnaProgrammer.TagKeys pendingResetKeys;
     private String pendingTagName;
     private String pendingDescription;
+    private String reservedTagId; // id-ul rezervarii din backend (reserve-first)
+
+    // Key2 (SDM meta read) ramane cheia de fabrica - verificarea foloseste Key3 (MAC)
+    private static final String FACTORY_KEY_HEX = "00000000000000000000000000000000";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -202,9 +206,11 @@ public class ProgramTagActivity extends AppCompatActivity {
                             binding.progressBar.setVisibility(View.GONE);
                             binding.textScanStatus.setText(R.string.programming_failed);
 
+                            // Cheile sunt deja salvate in backend (reserve-first),
+                            // deci nimic nu e pierdut. Se poate reincerca pe acelasi cip.
                             new AlertDialog.Builder(ProgramTagActivity.this)
                                     .setTitle(R.string.error)
-                                    .setMessage(error)
+                                    .setMessage(getString(R.string.chip_write_failed_safe, error))
                                     .setPositiveButton(R.string.ok, null)
                                     .show();
                         });
@@ -212,7 +218,20 @@ public class ProgramTagActivity extends AppCompatActivity {
 
                     @Override
                     public void onSuccess(Ntag424DnaProgrammer.ProgrammingResult result) {
-                        registerTagWithBackend(result, pendingTagName, pendingDescription);
+                        // Cheile au fost deja salvate in DB inainte de programare,
+                        // deci nu mai e nevoie de niciun apel la backend aici.
+                        runOnUiThread(() -> {
+                            isProgramming = false;
+                            binding.progressBar.setVisibility(View.GONE);
+                            binding.textScanStatus.setText(R.string.programming_complete);
+
+                            new AlertDialog.Builder(ProgramTagActivity.this)
+                                    .setTitle(R.string.success)
+                                    .setMessage(R.string.programming_complete)
+                                    .setPositiveButton(R.string.ok, (dialog, which) -> finish())
+                                    .setCancelable(false)
+                                    .show();
+                        });
                     }
                 });
             } catch (Exception e) {
@@ -272,59 +291,77 @@ public class ProgramTagActivity extends AppCompatActivity {
         pendingTagName = tagName;
         pendingDescription = binding.editDescription.getText().toString().trim();
 
-        // Show progress and wait for tag
+        // RESERVE-FIRST: generam cheile si le salvam in backend ÎNAINTE de a
+        // atinge cipul. Programam cipul DOAR cu cheile intoarse de backend
+        // (pe retry pot fi cele deja salvate). Asa nu se scrie niciodata pe cip
+        // o cheie pe care baza de date n-o are deja -> cipul nu poate fi pierdut.
         binding.buttonProgram.setEnabled(false);
         binding.progressBar.setVisibility(View.VISIBLE);
         binding.progressBar.setProgress(0);
-        binding.textScanStatus.setText(R.string.hold_tag_near_phone);
+        binding.textScanStatus.setText(R.string.checking_backend);
 
-        waitingForProgramScan = true;
-    }
+        ApiClient.ReserveTagRequest reserveReq = new ApiClient.ReserveTagRequest();
+        reserveReq.uid = expectedUid;                         // UID citit la prima scanare
+        reserveReq.name = tagName;
+        reserveReq.description = pendingDescription;
+        reserveReq.baseUrl = baseUrl;
+        reserveReq.appMasterKey = generateRandomKeyHex();     // chei propuse
+        reserveReq.sdmMetaReadKey = FACTORY_KEY_HEX;          // Key2 ramane factory (mod plaintext)
+        reserveReq.sdmFileReadKey = generateRandomKeyHex();
 
-    private void registerTagWithBackend(Ntag424DnaProgrammer.ProgrammingResult result,
-                                        String tagName, String description) {
-        ApiClient.RegisterTagRequest request = new ApiClient.RegisterTagRequest();
-        request.uid = result.uid;
-        request.appMasterKey = result.appMasterKey;
-        request.sdmMetaReadKey = result.sdmMetaReadKey;
-        request.sdmFileReadKey = result.sdmFileReadKey;
-        request.baseUrl = result.baseUrl;
-        request.name = tagName;
-        request.description = description;
-
-        CiprianApp.getInstance().getApiClient().registerTag(request,
-                new ApiClient.ApiCallback<ApiClient.RegisterTagResponse>() {
+        CiprianApp.getInstance().getApiClient().reserveTag(reserveReq,
+                new ApiClient.ApiCallback<ApiClient.ReserveTagResponse>() {
                     @Override
-                    public void onSuccess(ApiClient.RegisterTagResponse response) {
+                    public void onSuccess(ApiClient.ReserveTagResponse resp) {
                         runOnUiThread(() -> {
-                            isProgramming = false;
-                            binding.progressBar.setVisibility(View.GONE);
-                            binding.textScanStatus.setText(R.string.programming_complete);
-
-                            new AlertDialog.Builder(ProgramTagActivity.this)
-                                    .setTitle(R.string.success)
-                                    .setMessage(R.string.programming_complete)
-                                    .setPositiveButton(R.string.ok, (dialog, which) -> finish())
-                                    .setCancelable(false)
-                                    .show();
+                            // Cheile sunt salvate. Programam cipul cu EXACT cheile din DB.
+                            reservedTagId = resp.tagId;
+                            pendingConfig.appMasterKey = hexToBytes(resp.appMasterKey);
+                            pendingConfig.sdmFileReadKey = hexToBytes(resp.sdmFileReadKey);
+                            if (resp.baseUrl != null) {
+                                pendingConfig.baseUrl = resp.baseUrl;
+                            }
+                            binding.textScanStatus.setText(R.string.hold_tag_near_phone);
+                            waitingForProgramScan = true;
                         });
                     }
 
                     @Override
                     public void onError(String error) {
                         runOnUiThread(() -> {
-                            isProgramming = false;
+                            waitingForProgramScan = false;
                             binding.buttonProgram.setEnabled(true);
                             binding.progressBar.setVisibility(View.GONE);
+                            binding.textScanStatus.setText(R.string.backend_check_failed);
 
                             new AlertDialog.Builder(ProgramTagActivity.this)
-                                    .setTitle(R.string.success)
-                                    .setMessage("Tag programmed but failed to register: " + error)
-                                    .setPositiveButton(R.string.ok, (dialog, which) -> finish())
+                                    .setTitle(R.string.cannot_program_title)
+                                    .setMessage(getString(R.string.cannot_program_message, error))
+                                    .setPositiveButton(R.string.ok, null)
                                     .show();
                         });
                     }
                 });
+    }
+
+    private String generateRandomKeyHex() {
+        byte[] key = new byte[16];
+        new java.security.SecureRandom().nextBytes(key);
+        StringBuilder sb = new StringBuilder();
+        for (byte b : key) {
+            sb.append(String.format("%02X", b));
+        }
+        return sb.toString();
+    }
+
+    private byte[] hexToBytes(String hex) {
+        int len = hex.length();
+        byte[] data = new byte[len / 2];
+        for (int i = 0; i < len; i += 2) {
+            data[i / 2] = (byte) ((Character.digit(hex.charAt(i), 16) << 4)
+                    + Character.digit(hex.charAt(i + 1), 16));
+        }
+        return data;
     }
 
     private void onFactoryResetButtonClick() {

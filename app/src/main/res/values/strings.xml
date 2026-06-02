@@ -25,6 +25,11 @@
     <string name="programming">Programming…</string>
     <string name="programming_complete">Programming complete!</string>
     <string name="programming_failed">Programming failed</string>
+    <string name="checking_backend">Checking server &amp; account…</string>
+    <string name="backend_check_failed">Server check failed</string>
+    <string name="cannot_program_title">Cannot program tag</string>
+    <string name="cannot_program_message">The server/account check failed, so programming was stopped to avoid creating a tag that is not saved.\n\nReason: %1$s\n\nPlease log out, log in again and retry.</string>
+    <string name="chip_write_failed_safe">Writing to the chip failed, but the keys are already saved safely on the server — nothing is lost. Hold the same chip near the phone again to retry.\n\nReason: %1$s</string>
 
     <!-- Tag Details -->
     <string name="tag_details">Tag Details</string>
