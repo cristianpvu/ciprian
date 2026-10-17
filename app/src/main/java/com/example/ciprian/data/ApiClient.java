@@ -468,6 +468,137 @@ public class ApiClient {
         public String createdAt;
     }
 
+    // ==================== DINEDROID (restaurante / mese / bind) ====================
+
+    /** Restaurantele la care contul dinedroid legat are acces (SUPER_ADMIN le vede pe toate). */
+    public void getDinedroidRestaurants(ApiCallback<RestaurantListResponse> callback) {
+        String token = storage.getAuthToken();
+        if (token == null) { callback.onError("Not logged in"); return; }
+
+        Request request = new Request.Builder()
+                .url(Config.API_URL + "/api/dinedroid/restaurants")
+                .addHeader("Authorization", "Bearer " + token)
+                .get()
+                .build();
+
+        client.newCall(request).enqueue(new Callback() {
+            @Override public void onFailure(Call call, IOException e) {
+                Log.e(TAG, "Get restaurants failed", e);
+                callback.onError(e.getMessage());
+            }
+            @Override public void onResponse(Call call, Response response) throws IOException {
+                String body = response.body() != null ? response.body().string() : "";
+                if (response.isSuccessful()) {
+                    callback.onSuccess(gson.fromJson(body, RestaurantListResponse.class));
+                } else {
+                    callback.onError(parseError(body, "Failed to get restaurants: " + response.code()));
+                }
+            }
+        });
+    }
+
+    /** Mesele unui restaurant (cu numărul de taguri deja atribuite). */
+    public void getDinedroidTables(int restaurantId, ApiCallback<TableListResponse> callback) {
+        String token = storage.getAuthToken();
+        if (token == null) { callback.onError("Not logged in"); return; }
+
+        Request request = new Request.Builder()
+                .url(Config.API_URL + "/api/dinedroid/restaurants/" + restaurantId + "/tables")
+                .addHeader("Authorization", "Bearer " + token)
+                .get()
+                .build();
+
+        client.newCall(request).enqueue(new Callback() {
+            @Override public void onFailure(Call call, IOException e) {
+                Log.e(TAG, "Get tables failed", e);
+                callback.onError(e.getMessage());
+            }
+            @Override public void onResponse(Call call, Response response) throws IOException {
+                String body = response.body() != null ? response.body().string() : "";
+                if (response.isSuccessful()) {
+                    callback.onSuccess(gson.fromJson(body, TableListResponse.class));
+                } else {
+                    callback.onError(parseError(body, "Failed to get tables: " + response.code()));
+                }
+            }
+        });
+    }
+
+    /** Leagă cipul (uid) de o masă. Re-binding la altă masă doar actualizează legătura. */
+    public void bindTagToTable(int tableId, String uid, ApiCallback<BindTagResponse> callback) {
+        String token = storage.getAuthToken();
+        if (token == null) { callback.onError("Not logged in"); return; }
+
+        BindTagRequest reqBody = new BindTagRequest();
+        reqBody.uid = uid;
+
+        Request request = new Request.Builder()
+                .url(Config.API_URL + "/api/dinedroid/tables/" + tableId + "/bind")
+                .addHeader("Authorization", "Bearer " + token)
+                .post(RequestBody.create(gson.toJson(reqBody), JSON))
+                .build();
+
+        client.newCall(request).enqueue(new Callback() {
+            @Override public void onFailure(Call call, IOException e) {
+                Log.e(TAG, "Bind tag failed", e);
+                callback.onError(e.getMessage());
+            }
+            @Override public void onResponse(Call call, Response response) throws IOException {
+                String body = response.body() != null ? response.body().string() : "";
+                if (response.isSuccessful()) {
+                    callback.onSuccess(gson.fromJson(body, BindTagResponse.class));
+                } else {
+                    callback.onError(parseError(body, "Failed to bind tag: " + response.code()));
+                }
+            }
+        });
+    }
+
+    private String parseError(String body, String fallback) {
+        try {
+            ErrorResponse error = gson.fromJson(body, ErrorResponse.class);
+            if (error != null && error.error != null) return error.error;
+        } catch (Exception ignored) { /* corp non-JSON */ }
+        return fallback;
+    }
+
+    // ==================== DINEDROID models ====================
+
+    public static class DinedroidRestaurant {
+        public int id;
+        public String name;
+        public String city;
+        public String logoUrl;
+    }
+
+    public static class RestaurantListResponse {
+        public DinedroidRestaurant[] restaurants;
+        public int total;
+    }
+
+    public static class DinedroidTable {
+        public int id;
+        public Integer number;
+        public Integer seats;
+        public int tagCount;
+        public boolean programmed;
+    }
+
+    public static class TableListResponse {
+        public DinedroidTable[] tables;
+        public int total;
+    }
+
+    public static class BindTagRequest {
+        public String uid;
+    }
+
+    public static class BindTagResponse {
+        public boolean success;
+        public int tableId;
+        public String uid;
+    }
+
     public interface ApiCallback<T> {
         void onSuccess(T response);
         void onError(String error);

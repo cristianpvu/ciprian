@@ -100,7 +100,7 @@
 
                     </LinearLayout>
 
-                    <!-- Server -->
+                    <!-- Environment -->
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
@@ -110,18 +110,44 @@
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="@string/server"
+                            android:text="@string/environment"
                             android:textAppearance="?attr/textAppearanceLabelMedium"
                             android:textColor="?android:textColorSecondary" />
+
+                        <com.google.android.material.button.MaterialButtonToggleGroup
+                            android:id="@+id/toggleEnv"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            app:selectionRequired="true"
+                            app:singleSelection="true">
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/buttonEnvProd"
+                                style="?attr/materialButtonOutlinedStyle"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="@string/env_prod" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/buttonEnvDev"
+                                style="?attr/materialButtonOutlinedStyle"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="@string/env_dev" />
+
+                        </com.google.android.material.button.MaterialButtonToggleGroup>
 
                         <TextView
                             android:id="@+id/textServer"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="4dp"
-                            android:textAppearance="?attr/textAppearanceBodyMedium"
+                            android:layout_marginTop="8dp"
+                            android:textAppearance="?attr/textAppearanceBodySmall"
                             android:textColor="?android:textColorSecondary"
-                            tools:text="ciprian-nfc-api.onrender.com" />
+                            tools:text="ntag-verify.dinedroid.com" />
 
                     </LinearLayout>
 

@@ -15,6 +15,7 @@ public class CiprianApp extends Application {
     public void onCreate() {
         super.onCreate();
         instance = this;
+        Config.init(this); // aplică mediul salvat (PROD/DEV) înainte de orice request
         secureStorage = new SecureStorage(this);
         apiClient = new ApiClient(this);
     }

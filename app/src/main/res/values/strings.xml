@@ -92,6 +92,44 @@
     <string name="name">Name</string>
     <string name="account">Account</string>
     <string name="server">Server</string>
+    <string name="environment">Environment</string>
+    <string name="env_prod">Production</string>
+    <string name="env_dev">Dev</string>
+    <string name="switch_env_title">Switch environment?</string>
+    <string name="switch_env_message">You are switching to %1$s. This uses a different backend and database, so you will be logged out. Tags you program from now on will point to %1$s.</string>
+    <string name="switch_confirm">Switch &amp; log out</string>
+
+    <!-- Assign tag to table -->
+    <string name="assign_table">Assign to table</string>
+    <string name="assign_tag_info">Tag: %1$s · %2$s</string>
+    <string name="restaurant">Restaurant</string>
+    <string name="table">Table</string>
+    <string name="select_restaurant">Select restaurant</string>
+    <string name="select_table">Select table</string>
+    <string name="bind_tag">Bind to table</string>
+    <string name="loading_restaurants">Loading restaurants…</string>
+    <string name="loading_tables">Loading tables…</string>
+    <string name="no_restaurants">No restaurants available for this account.</string>
+    <string name="no_tables">This restaurant has no tables.</string>
+    <string name="table_label">Table %1$s</string>
+    <string name="already_programmed">has tag</string>
+    <string name="binding">Binding…</string>
+    <string name="bind_success">Tag assigned to table.</string>
+
+    <!-- Restaurants &amp; tables (write chip straight onto a table) -->
+    <string name="restaurants_tables">Restaurants &amp; tables</string>
+    <string name="pick_restaurant_hint">Pick a restaurant to see its tables.</string>
+    <string name="no_tag_yet">No chip yet</string>
+    <string name="write_chip">Write chip</string>
+    <string name="add_chip">Add chip</string>
+    <string name="programming_for">%1$s · %2$s</string>
+    <string name="programmed_and_bound">Chip written and linked to %1$s.</string>
+    <string name="programmed_bind_failed">Chip written, but linking to the table failed: %1$s\n\nThe chip is saved — retry from the tag details ("Assign to table").</string>
+
+    <plurals name="tags_on_table">
+        <item quantity="one">%d chip</item>
+        <item quantity="other">%d chips</item>
+    </plurals>
     <string name="login_subtitle">Program and manage NFC tags</string>
     <string name="no_account">Don\'t have an account?</string>
     <string name="have_account">Already have an account?</string>

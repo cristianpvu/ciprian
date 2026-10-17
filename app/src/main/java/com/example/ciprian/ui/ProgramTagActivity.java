@@ -46,6 +46,11 @@ public class ProgramTagActivity extends AppCompatActivity {
     private String pendingDescription;
     private String reservedTagId; // id-ul rezervarii din backend (reserve-first)
 
+    // Masa pentru care se scrie cipul (venita din TablesActivity). Daca e setata,
+    // cipul se leaga automat de masa imediat dupa scrierea reusita.
+    private int boundTableId = -1;
+    private String boundTableLabel;
+
     // Key2 (SDM meta read) ramane cheia de fabrica - verificarea foloseste Key3 (MAC)
     private static final String FACTORY_KEY_HEX = "00000000000000000000000000000000";
 
@@ -95,8 +100,56 @@ public class ProgramTagActivity extends AppCompatActivity {
         binding.buttonFactoryReset.setOnClickListener(v -> onFactoryResetButtonClick());
     }
 
+    /**
+     * Leaga cipul proaspat scris de masa aleasa. Cipul e deja programat si salvat
+     * in DB (reserve-first), deci daca bind-ul pica nu se pierde nimic: se poate
+     * reincerca din detaliile tagului ("Assign to table").
+     */
+    private void bindToTable() {
+        binding.progressBar.setVisibility(View.VISIBLE);
+        binding.textScanStatus.setText(R.string.binding);
+
+        CiprianApp.getInstance().getApiClient().bindTagToTable(boundTableId, expectedUid,
+                new ApiClient.ApiCallback<ApiClient.BindTagResponse>() {
+                    @Override public void onSuccess(ApiClient.BindTagResponse resp) {
+                        runOnUiThread(() -> {
+                            binding.progressBar.setVisibility(View.GONE);
+                            showProgrammingDone(getString(R.string.programmed_and_bound,
+                                    boundTableLabel != null ? boundTableLabel : ""));
+                        });
+                    }
+                    @Override public void onError(String error) {
+                        runOnUiThread(() -> {
+                            binding.progressBar.setVisibility(View.GONE);
+                            showProgrammingDone(getString(R.string.programmed_bind_failed, error));
+                        });
+                    }
+                });
+    }
+
+    private void showProgrammingDone(String message) {
+        new AlertDialog.Builder(ProgramTagActivity.this)
+                .setTitle(R.string.success)
+                .setMessage(message)
+                .setPositiveButton(R.string.ok, (dialog, which) -> finish())
+                .setCancelable(false)
+                .show();
+    }
+
     private void loadDefaults() {
-        binding.editBaseUrl.setText(com.example.ciprian.Config.VERIFY_URL);
+        binding.editBaseUrl.setText(com.example.ciprian.Config.MENU_BASE_URL);
+
+        // Venit din lista de mese: precompletam numele si retinem masa pentru bind.
+        boundTableId = getIntent().getIntExtra("table_id", -1);
+        boundTableLabel = getIntent().getStringExtra("table_label");
+        if (boundTableId > 0) {
+            String restaurantName = getIntent().getStringExtra("restaurant_name");
+            if (boundTableLabel != null) binding.editTagName.setText(boundTableLabel);
+            if (restaurantName != null) binding.editDescription.setText(restaurantName);
+            binding.toolbar.setSubtitle(restaurantName != null
+                    ? getString(R.string.programming_for, boundTableLabel, restaurantName)
+                    : boundTableLabel);
+        }
     }
 
     @Override
@@ -225,12 +278,12 @@ public class ProgramTagActivity extends AppCompatActivity {
                             binding.progressBar.setVisibility(View.GONE);
                             binding.textScanStatus.setText(R.string.programming_complete);
 
-                            new AlertDialog.Builder(ProgramTagActivity.this)
-                                    .setTitle(R.string.success)
-                                    .setMessage(R.string.programming_complete)
-                                    .setPositiveButton(R.string.ok, (dialog, which) -> finish())
-                                    .setCancelable(false)
-                                    .show();
+                            // Cip scris pentru o masa anume -> il legam automat de ea.
+                            if (boundTableId > 0) {
+                                bindToTable();
+                            } else {
+                                showProgrammingDone(getString(R.string.programming_complete));
+                            }
                         });
                     }
                 });

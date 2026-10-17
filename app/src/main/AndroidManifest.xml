@@ -55,6 +55,16 @@
             android:exported="false"
             android:parentActivityName=".ui.MainActivity" />
 
+        <activity
+            android:name=".ui.AssignTableActivity"
+            android:exported="false"
+            android:parentActivityName=".ui.TagDetailsActivity" />
+
+        <activity
+            android:name=".ui.TablesActivity"
+            android:exported="false"
+            android:parentActivityName=".ui.MainActivity" />
+
     </application>
 
 </manifest>

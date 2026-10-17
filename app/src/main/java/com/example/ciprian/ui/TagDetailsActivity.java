@@ -115,8 +115,20 @@ public class TagDetailsActivity extends AppCompatActivity {
     }
 
     private void setupButtons() {
+        binding.btnAssignTable.setOnClickListener(v -> openAssignTable());
         binding.btnFactoryReset.setOnClickListener(v -> confirmFactoryReset());
         binding.btnDelete.setOnClickListener(v -> confirmDelete());
+    }
+
+    private void openAssignTable() {
+        if (tagUid == null || tagUid.isEmpty()) {
+            Toast.makeText(this, R.string.error, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        Intent intent = new Intent(this, AssignTableActivity.class);
+        intent.putExtra("tag_uid", tagUid);
+        intent.putExtra("tag_name", binding.textTagName.getText().toString());
+        startActivity(intent);
     }
 
     @Override

@@ -67,7 +67,10 @@ public class MainActivity extends AppCompatActivity {
 
     private void setupToolbar() {
         binding.toolbar.setOnMenuItemClickListener(item -> {
-            if (item.getItemId() == R.id.action_settings) {
+            if (item.getItemId() == R.id.action_tables) {
+                startActivity(new Intent(this, TablesActivity.class));
+                return true;
+            } else if (item.getItemId() == R.id.action_settings) {
                 startActivity(new Intent(this, SettingsActivity.class));
                 return true;
             } else if (item.getItemId() == R.id.action_logout) {
