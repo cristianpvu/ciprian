@@ -7,6 +7,7 @@ import android.view.View;
 import android.widget.ArrayAdapter;
 
 import androidx.activity.EdgeToEdge;
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
@@ -165,12 +166,34 @@ public class TablesActivity extends AppCompatActivity {
         });
     }
 
-    /** Deschide programarea pentru masa aleasa; bind-ul se face automat dupa scriere. */
+    /** Masa aleasa: fie scriem un cip nou pentru ea, fie legam un cip deja programat. */
     private void onTableClick(ApiClient.DinedroidTable table) {
+        new AlertDialog.Builder(this)
+                .setTitle(tableName(this, table))
+                .setItems(new CharSequence[]{
+                        getString(R.string.program_new_tag),
+                        getString(R.string.attach_to_table)
+                }, (dialog, which) -> {
+                    if (which == 0) openProgramming(table);
+                    else openBinding(table);
+                })
+                .show();
+    }
+
+    /** Programarea pentru masa aleasa; bind-ul se face automat dupa scriere. */
+    private void openProgramming(ApiClient.DinedroidTable table) {
         Intent intent = new Intent(this, ProgramTagActivity.class);
         intent.putExtra("table_id", table.id);
         intent.putExtra("table_label", tableName(this, table));
         intent.putExtra("restaurant_name", selectedRestaurantName);
+        startActivity(intent);
+    }
+
+    /** Leaga de masa un cip deja programat, doar prin scanarea UID-ului. */
+    private void openBinding(ApiClient.DinedroidTable table) {
+        Intent intent = new Intent(this, BindTagActivity.class);
+        intent.putExtra(BindTagActivity.EXTRA_TABLE_ID, table.id);
+        intent.putExtra(BindTagActivity.EXTRA_TABLE_LABEL, tableName(this, table));
         startActivity(intent);
     }
 

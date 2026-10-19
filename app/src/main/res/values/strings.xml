@@ -31,6 +31,15 @@
     <string name="cannot_program_message">The server/account check failed, so programming was stopped to avoid creating a tag that is not saved.\n\nReason: %1$s\n\nPlease log out, log in again and retry.</string>
     <string name="chip_write_failed_safe">Writing to the chip failed, but the keys are already saved safely on the server — nothing is lost. Hold the same chip near the phone again to retry.\n\nReason: %1$s</string>
 
+    <!-- Attach an already-programmed tag to a table (no re-programming) -->
+    <string name="program_new_tag">Program a new tag</string>
+    <string name="attach_to_table">Attach an existing tag</string>
+    <string name="bind_instructions">Hold an already-programmed tag near the phone to attach it to %1$s.</string>
+    <string name="bind_waiting">Waiting for tag…</string>
+    <string name="binding_tag">Linking tag…</string>
+    <string name="bind_complete">Tag attached to %1$s. Customers can scan it to order.</string>
+    <string name="bind_failed">Linking failed</string>
+
     <!-- Tag Details -->
     <string name="tag_details">Tag Details</string>
     <string name="statistics">Statistics</string>
