@@ -174,9 +174,13 @@ public class Ntag424DnaProgrammer {
         NdefTemplateMaster master = new NdefTemplateMaster();
         master.usesLRP = false;  // We're using AES, not LRP
 
-        // Use the configured base URL with SDM placeholders
-        // Format: baseUrl?uid={UID}&ctr={COUNTER}&cmac={MAC}
-        String urlTemplate = config.baseUrl + "?uid={UID}&ctr={COUNTER}&cmac={MAC}";
+        // Encrypted mode: UID + counter criptate cu Key2 in {PICC}, nu mai apar in clar.
+        // Plaintext mode (Key2 factory): {UID}/{COUNTER} - librăria forteaza atunci
+        // sdmMetaReadPerm = ACCESS_EVERYONE.
+        boolean encrypted = config.sdmMetaReadKey != null && !isFactoryKey(config.sdmMetaReadKey);
+        String urlTemplate = encrypted
+                ? config.baseUrl + "?picc={PICC}&cmac={MAC}"
+                : config.baseUrl + "?uid={UID}&ctr={COUNTER}&cmac={MAC}";
         Log.d(TAG, "URL Template: " + urlTemplate);
 
         // Generate NDEF record - this also updates sdmSettings with correct offsets
@@ -221,6 +225,20 @@ public class Ntag424DnaProgrammer {
         // Apply new file settings
         ChangeFileSettings.run(communicator, Ntag424.NDEF_FILE_NUMBER, ndefFileSettings);
         Log.d(TAG, "File settings updated with SDM");
+
+        byte[] metaReadKey = Ntag424.FACTORY_KEY;
+        if (encrypted) {
+            int key2Version = GetKeyVersion.run(communicator, 2);
+            Log.d(TAG, "Key2 version: " + key2Version);
+            metaReadKey = config.sdmMetaReadKey;
+            if (key2Version == 0) {
+                callback.onProgress("Changing PICC key (Key2)...", 70);
+                ChangeKey.run(communicator, 2, Ntag424.FACTORY_KEY, metaReadKey, (byte) 0x01);
+                Log.d(TAG, "PICC key (Key2) changed");
+            } else {
+                Log.d(TAG, "Key2 already changed (version=" + key2Version + "), keeping existing");
+            }
+        }
 
         // Check if Key3 is already changed (key version != 0)
         int key3Version = GetKeyVersion.run(communicator, 3);
@@ -276,7 +294,7 @@ public class Ntag424DnaProgrammer {
         ProgrammingResult result = new ProgrammingResult();
         result.uid = uidHex;
         result.appMasterKey = bytesToHex(newMasterKey);
-        result.sdmMetaReadKey = bytesToHex(Ntag424.FACTORY_KEY);  // Not used in plaintext mode
+        result.sdmMetaReadKey = bytesToHex(metaReadKey);  // factory in plaintext mode
         result.sdmFileReadKey = bytesToHex(newMacKey);  // THIS IS THE SECRET!
         result.baseUrl = config.baseUrl;
 
@@ -292,13 +310,25 @@ public class Ntag424DnaProgrammer {
                 byte[] masterKey = hexToBytes(keys.appMasterKey);
                 byte[] macKey = keys.sdmFileReadKey != null ? 
                     hexToBytes(keys.sdmFileReadKey) : Ntag424.FACTORY_KEY;
+                byte[] metaKey = keys.sdmMetaReadKey != null ?
+                    hexToBytes(keys.sdmMetaReadKey) : Ntag424.FACTORY_KEY;
 
                 callback.onProgress("Authenticating...");
                 if (!AESEncryptionMode.authenticateEV2(communicator, 0, masterKey)) {
                     throw new Exception("Authentication failed. Wrong key?");
                 }
 
-                // Reset Key3 (MAC key) first - while we're still authenticated with Key0
+                // Reset Key2 (PICC key) - doar daca a fost schimbata (modul criptat)
+                int key2Version = GetKeyVersion.run(communicator, 2);
+                if (key2Version != 0) {
+                    callback.onProgress("Restoring Key2 (PICC key)...");
+                    ChangeKey.run(communicator, 2, metaKey, Ntag424.FACTORY_KEY, (byte) 0x00);
+                    Log.d(TAG, "Key2 reset to factory");
+                } else {
+                    Log.d(TAG, "Key2 already factory");
+                }
+
+                // Reset Key3 (MAC key) - while we're still authenticated with Key0
                 callback.onProgress("Restoring Key3 (MAC key)...");
                 int key3Version = GetKeyVersion.run(communicator, 3);
                 if (key3Version != 0) {
@@ -330,6 +360,13 @@ public class Ntag424DnaProgrammer {
         byte[] key = new byte[16];
         new SecureRandom().nextBytes(key);
         return key;
+    }
+
+    private boolean isFactoryKey(byte[] key) {
+        for (byte b : key) {
+            if (b != 0) return false;
+        }
+        return true;
     }
 
     private String bytesToHex(byte[] bytes) {
@@ -366,6 +403,7 @@ public class Ntag424DnaProgrammer {
     public static class ProgrammingConfig {
         public String baseUrl;          // Base URL for SDM
         public byte[] appMasterKey;     // New master key (or null for random)
+        public byte[] sdmMetaReadKey;   // Key2 comuna (link criptat) - null/factory = plaintext
         public byte[] sdmFileReadKey;   // New MAC key (Key3) - or null for random
         public byte[] currentKey;       // Current key if already programmed
     }

@@ -51,7 +51,8 @@ public class ProgramTagActivity extends AppCompatActivity {
     private int boundTableId = -1;
     private String boundTableLabel;
 
-    // Key2 (SDM meta read) ramane cheia de fabrica - verificarea foloseste Key3 (MAC)
+    // Key2 (SDM meta read) propusa de telefon. Backend-ul o inlocuieste cu Key2
+    // comuna a mediului (link criptat); daca nu e configurata ramane factory (plaintext).
     private static final String FACTORY_KEY_HEX = "00000000000000000000000000000000";
 
     @Override
@@ -359,7 +360,7 @@ public class ProgramTagActivity extends AppCompatActivity {
         reserveReq.description = pendingDescription;
         reserveReq.baseUrl = baseUrl;
         reserveReq.appMasterKey = generateRandomKeyHex();     // chei propuse
-        reserveReq.sdmMetaReadKey = FACTORY_KEY_HEX;          // Key2 ramane factory (mod plaintext)
+        reserveReq.sdmMetaReadKey = FACTORY_KEY_HEX;          // backend-ul pune Key2 comuna
         reserveReq.sdmFileReadKey = generateRandomKeyHex();
 
         CiprianApp.getInstance().getApiClient().reserveTag(reserveReq,
@@ -371,6 +372,9 @@ public class ProgramTagActivity extends AppCompatActivity {
                             reservedTagId = resp.tagId;
                             pendingConfig.appMasterKey = hexToBytes(resp.appMasterKey);
                             pendingConfig.sdmFileReadKey = hexToBytes(resp.sdmFileReadKey);
+                            if (resp.sdmMetaReadKey != null) {
+                                pendingConfig.sdmMetaReadKey = hexToBytes(resp.sdmMetaReadKey);
+                            }
                             if (resp.baseUrl != null) {
                                 pendingConfig.baseUrl = resp.baseUrl;
                             }

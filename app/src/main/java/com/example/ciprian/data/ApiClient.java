@@ -578,7 +578,7 @@ public class ApiClient {
 
     public static class DinedroidTable {
         public int id;
-        public Integer number;
+        public String number;  // ex. "T1", "S3" - nu e numeric
         public Integer seats;
         public int tagCount;
         public boolean programmed;
